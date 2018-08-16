@@ -50,8 +50,25 @@ void setup() {
 }
 
 void setupStepperPins() {
-  for (int i = 0; i < 4; i++) {
-    pinMode(stepper_pin[i], OUTPUT);
+  for (int i = 0; i < 3; i++) {
+    pinMode(multiplexer_pin[i], OUTPUT);
+    digitalWrite(multiplexer_pin[i], LOW);
+  }
+
+  pinMode(stepper_pin, OUTPUT);
+  digitalWrite(stepper_pin, LOW);
+}
+
+void selectMuxPin(byte pin) {
+  if (pin > 7) {
+    return;
+  }
+  for (int i = 0; i < 3; i++) {
+    if (pin & (1 << i)) {
+      digitalWrite(multiplexer_pin[i], HIGH);
+    } else {
+      digitalWrite(multiplexer_pin[i], LOW);
+    }
   }
 }
 
@@ -115,7 +132,7 @@ void handshake() {
 }
 
 void requestForState() {
-  String reply = "{\"state\":\"" + String(coverage) + (twilight ? "t" : "") + "-" + (measure > 0 ? String(measure) : "") + "\"}";
+  String reply = "{\"state\":\"" + String(coverage) + (twilight ? "t" : "") + (measure > 0 ?  ("-" + String(measure)) : "") + "\"}";
   server.send(200, "text/plain", reply);
   readData(server.arg("plain"));
 }
@@ -425,17 +442,21 @@ void setCoverage(int set, bool calibrate) {
 }
 
 void cover(int lag) {
-  for (int i = 0; i < 4; i++) {
-    digitalWrite(stepper_pin[i], HIGH);
+  for (int i = 0; i < 8; i++) {
+    selectMuxPin(i);
+
+    digitalWrite(stepper_pin, HIGH);
     delay(lag);
-    digitalWrite(stepper_pin[i], LOW);
+    digitalWrite(stepper_pin, LOW);
   }
 }
 
 void uncover(int lag) {
-  for (int i = 4; i >= 0; i--) {
-    digitalWrite(stepper_pin[i], HIGH);
+  for (int i = 7; i >= 0; i--) {
+    selectMuxPin(i);
+
+    digitalWrite(stepper_pin, HIGH);
     delay(lag);
-    digitalWrite(stepper_pin[i], LOW);
+    digitalWrite(stepper_pin, LOW);
   }
 }

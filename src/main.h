@@ -4,7 +4,8 @@ const String device = "blinds"; //switch
 
 const int sd_pin = D8;
 const int twilight_pin = A0;
-const int stepper_pin[] = {D0, D5, D6, D7};
+const int stepper_pin = D0;
+const int multiplexer_pin[] = {D5, D6, D7};
 
 struct Smart {
   String days;
