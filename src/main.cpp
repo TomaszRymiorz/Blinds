@@ -47,6 +47,11 @@ void setup() {
   }
 
   setupStepperPins();
+
+  if (RTC.isrunning()) {
+    DateTime now = RTC.now();
+    start = now.unixtime();
+  }
 }
 
 void setupStepperPins() {
@@ -57,19 +62,6 @@ void setupStepperPins() {
 
   pinMode(stepper_pin, OUTPUT);
   digitalWrite(stepper_pin, LOW);
-}
-
-void selectMuxPin(byte pin) {
-  if (pin > 7) {
-    return;
-  }
-  for (int i = 0; i < 3; i++) {
-    if (pin & (1 << i)) {
-      digitalWrite(multiplexer_pin[i], HIGH);
-    } else {
-      digitalWrite(multiplexer_pin[i], LOW);
-    }
-  }
 }
 
 
@@ -116,15 +108,24 @@ void startRestServer() {
 void handshake() {
   String reply;
   if (readData(server.arg("plain")) == -1) {
-    serialPrint("Identity confirmed");
+    serialPrint("Shake hands");
+
+    uint32_t active = 0;
+    if (RTC.isrunning()) {
+      DateTime now = RTC.now();
+      active = now.unixtime() - start;
+    }
 
     reply = "{\"id\":\"" +  WiFi.macAddress()
-    + "\",\"coverage\":\"" + String(coverage)
-    + "\",\"twilight\":\"" + String(twilight)
-    + "\",\"smart\":\"" + smartString
-    + "\",\"steps\":\"" + steps
-    + "\",\"rtc\":\"" + RTC.isrunning()
-    + "\",\"reversed\":\"" + reversed + "\"}";
+    + "\",\"coverage\":" + coverage
+    + ",\"twilight\":" + twilight
+    + ",\"sunset\":" + sunset
+    + ",\"sunrise\":" + sunrise
+    + ",\"smart\":\"" + smartString
+    + "\",\"steps\":" + steps
+    + ",\"rtc\":" + RTC.isrunning()
+    + ",\"active\":" + active
+    + ",\"reversed\":" + reversed + "}";
   } else {
     reply = "0";
   }
@@ -134,7 +135,6 @@ void handshake() {
 void requestForState() {
   String reply = "{\"state\":\"" + String(coverage) + (twilight ? "t" : "") + (measure > 0 ?  ("-" + String(measure)) : "") + "\"}";
   server.send(200, "text/plain", reply);
-  readData(server.arg("plain"));
 }
 
 void receivedTheData() {
@@ -175,6 +175,8 @@ void makeMeasurement() {
 
 
 void loop() {
+  server.handleClient();
+
   if (destination != 0) {
     if (actual < abs(destination)) {
       actual++;
@@ -190,7 +192,6 @@ void loop() {
         } else {
           uncover(lag + 1);
         }
-        blackout = false;
       }
     } else {
       destination = 0;
@@ -201,7 +202,9 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     if (reconnect) {
       serialPrint("Reconnection with Wi-Fi");
-      connectingToWifi();
+      if (!connectingToWifi()) {
+        initiatingWPS();
+      }
     } else {
       if (initiatingWPS()) {
         setupStepperPins();
@@ -209,8 +212,6 @@ void loop() {
     }
     return;
   }
-
-  server.handleClient();
 
   if (measurement) {
     measure++;
@@ -234,7 +235,7 @@ void loop() {
 
   if (daylightHasChanged()) {
     if (offline) {
-      postToTwin("{\"twilight\":\"" + String(twilight) + "\"}");
+      postToTwin("{\"twilight\":" + String(twilight) + "}");
     } else {
       putDataOnServer("twilight=" + String(twilight));
     }
@@ -255,6 +256,16 @@ bool daylightHasChanged() {
 
   if (twilight != (light < 100)) {
     twilight = light < 100;
+
+    if (RTC.isrunning()) {
+      DateTime now = RTC.now();
+
+      if (twilight) {
+        sunset = now.unixtime();
+      } else {
+        sunrise = now.unixtime();
+      }
+    }
     return true;
   }
   return false;
@@ -293,7 +304,7 @@ int readData(String payload) {
     twin = jsonObject["twin"].as<String>();
   }
 
-  if (jsonObject.containsKey("id") && jsonObject["id"].as<String>() == WiFi.macAddress()) {
+  if (jsonObject.containsKey("id") && jsonObject["id"].as<String>() == "idom") {
     return -1;
   }
 
@@ -361,7 +372,7 @@ void setSmart() {
 
       coverAtNight = strContains(smart, "n");
 
-      smartArray[i] = (Smart) {days, coverAtNight, coverTime, uncoverTime, 0};
+      smartArray[i] = (Smart) {days, coverAtNight, 0, coverTime, uncoverTime, 0};
     }
   }
 }
@@ -397,16 +408,15 @@ void checkSmart() {
 
     if (smartArray[i].coverAtNight
       && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1]) && currentTime < 600))) {
-        if (twilight && !blackout) {
+        if (twilight && (smartArray[i].blackout + 4320) < now.unixtime()) {
           blinds = 100;
           result = true;
-          blackout = true;
+          smartArray[i].blackout = now.unixtime();
           serialPrint("The smart function activated the cover at night");
         }
-        if (blackout && !twilight) {
+        if (!twilight && (smartArray[i].blackout + 4320) > now.unixtime()) {
           blinds = 0;
           result = true;
-          blackout = false;
           serialPrint("The smart function activated the uncover at day");
         }
       }
@@ -458,5 +468,18 @@ void uncover(int lag) {
     digitalWrite(stepper_pin, HIGH);
     delay(lag);
     digitalWrite(stepper_pin, LOW);
+  }
+}
+
+void selectMuxPin(byte pin) {
+  if (pin > 7) {
+    return;
+  }
+  for (int i = 0; i < 3; i++) {
+    if (pin & (1 << i)) {
+      digitalWrite(multiplexer_pin[i], HIGH);
+    } else {
+      digitalWrite(multiplexer_pin[i], LOW);
+    }
   }
 }

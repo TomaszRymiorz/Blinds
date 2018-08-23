@@ -10,6 +10,7 @@ const int multiplexer_pin[] = {D5, D6, D7};
 struct Smart {
   String days;
   bool coverAtNight;
+  uint32_t blackout;
   int coverTime;
   int uncoverTime;
   uint32_t access;
@@ -45,3 +46,4 @@ void checkSmart();
 void setCoverage(int set, bool calibrate);
 void cover(int lag);
 void uncover(int lag);
+void selectMuxPin(byte pin);

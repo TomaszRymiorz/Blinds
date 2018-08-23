@@ -20,6 +20,7 @@ const String database = "idom";
 
 bool reconnect = false;
 uint32_t loopTime = 0;
+uint32_t start = 0;
 
 bool offline = true;
 String twin = "0";
@@ -33,7 +34,8 @@ String smartString = "0";
 int smartCount = 0;
 
 bool twilight = false;
-bool blackout = false;
+uint32_t sunset = 0;
+uint32_t sunrise = 0;
 
 bool strContains(String text, String value);
 bool timeHasChanged();
@@ -46,7 +48,7 @@ void writeOffset();
 void writeSmart();
 void writeWiFiConfiguration();
 void writeOnSD(String file, String value1, String value2, String text);
-void connectingToWifi();
+bool connectingToWifi();
 bool initiatingWPS();
 String get1Smart(String smartString, int index);
 void getOnlineData();
@@ -218,7 +220,7 @@ void writeOnSD(String file, String value1, String value2, String comment) {
 }
 
 
-void connectingToWifi() {
+bool connectingToWifi() {
   serialPrint("Connecting to Wi-Fi");
 
   WiFi.begin(ssid.c_str(), password.c_str());
@@ -235,8 +237,10 @@ void connectingToWifi() {
 
     startRestServer();
     reconnect = true;
+    return true;
   } else {
     Serial.print(" timed out");
+    return false;
   }
 }
 
@@ -332,6 +336,6 @@ void postToTwin(String values) {
   HTTP.begin("http://" + twin + "/set");
   HTTP.addHeader("Accept", "application/json, text/plain, */*");
   HTTP.addHeader("Content-Type", "application/json;charset=utf-8");
-  HTTP.POST(values);
+  HTTP.PUT(values);
   HTTP.end();
 }
