@@ -1,4 +1,4 @@
-# Blinds 1
+# Blinds 2
 Oprogramowanie rolety automatycznego domu. 
 
 ### Roleta - podwójne okno
