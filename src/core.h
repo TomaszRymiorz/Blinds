@@ -34,8 +34,6 @@ String smartString = "0";
 int smartCount = 0;
 
 bool twilight = false;
-uint32_t sunset = 0;
-uint32_t sunrise = 0;
 
 bool strContains(String text, String value);
 bool timeHasChanged();

@@ -27,6 +27,9 @@ const int lag = 4;
 bool measurement = false;
 int measure = 0;
 
+uint32_t sunset = 0;
+uint32_t sunrise = 0;
+
 void setupStepperPins();
 void readSteps();
 void readCoverage();
