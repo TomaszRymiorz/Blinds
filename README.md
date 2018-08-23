@@ -1,8 +1,8 @@
 # Blinds 1
 Oprogramowanie rolety automatycznego domu. 
 
-### Roleta
-Całość zbudowana na WIFI D1 mini z modułem Data logger (RTC DS1307 + MicroSD) oraz silnikiem krokowym 28BYJ-48.
+### Roleta - podwójne okno
+Mechanizm rolety zbudowany jest w oparciu o WIFI D1 mini wraz z modułem Data logger (RTC DS1307 + MicroSD). Całości dopełniają dwa silniczki krokowe 28BYJ-48, każdy ze sterownikiem, multiplexer oraz fotorezystor pełniący funkcję czujnika zmierzchowego. 
 
 ### Możliwości
 Łączność z roletą odbywa się przez sieć Wi-Fi. 
