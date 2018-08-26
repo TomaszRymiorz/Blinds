@@ -26,6 +26,7 @@ const int lag = 4;
 
 bool measurement = false;
 int measure = 0;
+int calibration = 0;
 
 uint32_t sunset = 0;
 uint32_t sunrise = 0;

@@ -98,7 +98,7 @@ void readOffset() {
   String s = readFromSD("offset");
   if (s != "-1") {
     offset = s.toInt();
-    Serial.printf("\n Offset: %s", s.c_str());
+    Serial.printf("\n Offset: %i", offset);
   }
 }
 
@@ -106,7 +106,7 @@ void readSmart() {
   String s = readFromSD("smart");
   if (s != "-1") {
     smartString = s;
-    Serial.printf("\n Smart: %s", s.c_str());
+    Serial.printf("\n Smart: %s", smartString.c_str());
     setSmart();
   }
 }

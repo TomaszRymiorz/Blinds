@@ -69,7 +69,7 @@ void readSteps() {
   String s = readFromSD("steps");
   if (s != "-1") {
     steps = s.toInt();
-    Serial.printf("\n Steps: %s", s.c_str());
+    Serial.printf("\n Steps: %i", steps);
   }
 }
 
@@ -77,7 +77,7 @@ void readCoverage() {
   String s = readFromSD("coverage");
   if (s != "-1") {
     coverage = s.toInt();
-    Serial.printf("\n Coverage: %s", s.c_str());
+    Serial.printf("\n Coverage: %i", coverage);
     Serial.print('%');
   }
 }
@@ -119,8 +119,8 @@ void handshake() {
     reply = "{\"id\":\"" +  WiFi.macAddress()
     + "\",\"coverage\":" + coverage
     + ",\"twilight\":" + twilight
-    + ",\"sunset\":" + sunset
-    + ",\"sunrise\":" + sunrise
+    + ",\"sunset\":" + (sunset > 0 ? (sunset - offset) : 0)
+    + ",\"sunrise\":" + (sunrise > 0 ? (sunrise - offset) : 0)
     + ",\"smart\":\"" + smartString
     + "\",\"steps\":" + steps
     + ",\"rtc\":" + RTC.isrunning()
@@ -129,11 +129,15 @@ void handshake() {
   } else {
     reply = "0";
   }
+
   server.send(200, "text/plain", reply);
 }
 
 void requestForState() {
-  String reply = "{\"state\":\"" + String(coverage) + (twilight ? "t" : "") + (measure > 0 ?  ("-" + String(measure)) : "") + "\"}";
+  String reply = "{\"state\":\"" + String(coverage)
+  + (twilight ? "t" : "")
+  + (measure > 0 ?  ("-" + String(measure)) : "") + "\"}";
+
   server.send(200, "text/plain", reply);
 }
 
@@ -144,6 +148,7 @@ void receivedTheData() {
     return;
   }
   server.send(200, "text/plain", "Data has received");
+
   readData(server.arg("plain"));
 }
 
@@ -151,10 +156,10 @@ void reverseDirection() {
   reversed = !reversed;
 
   SPI.begin();
-  if (SD.exists("reversed.txt") && !reversed) {
+  if (!reversed && SD.exists("reversed.txt")) {
     SD.remove("reversed.txt");
   }
-  if (!SD.exists("reversed.txt") && reversed) {
+  if (reversed) {
     writeOnSD("reversed", "", "", "// Obecność tego pliku wskazuje na odwrotny kierunek obrotów silnika.");
   }
   SPI.end();
@@ -195,6 +200,7 @@ void loop() {
       }
     } else {
       destination = 0;
+      calibration = 0;
     }
     return;
   }
@@ -277,7 +283,7 @@ int readData(String payload) {
 
   if (!jsonObject.success()) {
     if (payload.length() > 0) {
-      Serial.print("\n" + payload);
+      Serial.print("\n " + payload);
       Serial.print("\n Parsing failed!");
     }
     return 0;
@@ -322,7 +328,9 @@ int readData(String payload) {
   }
 
   if (jsonObject.containsKey("calibrate")) {
-    setCoverage(jsonObject["calibrate"].as<int>(), true);
+    String calibrationData = jsonObject["calibrate"].as<String>();
+    calibration = strContains(calibrationData, "s") ? 2 : (strContains(calibrationData, "p") ? 1 : 0);
+    setCoverage(calibrationData.substring(1, calibrationData.length()).toInt(), true);
   }
 
   return jsonObject.success();
@@ -437,17 +445,34 @@ void setCoverage(int set, bool calibrate) {
     if (calibrate) {
       destination = set;
 
-      Serial.printf("\nCalibration. Blinds movement by %smm.", String(destination).c_str());
+      Serial.printf("\nCalibration. Blinds movement by %imm. (%i)", (int)destination, calibration);
     } else {
-      int value = set - coverage;
-      destination = ((float)steps / 100.0) * (float)value;
+      destination = ((float)steps / 100.0) * (float)(set - coverage);
       coverage = set;
       writeCoverage();
 
-      Serial.printf("\nBlinds movement by %s steps. Changed state to %s", String(destination).c_str(), String(set).c_str());
+      Serial.printf("\nBlinds movement by %i steps. Changed state to %i", (int)destination, set);
       Serial.print('%');
     }
     actual = 0;
+  } else {
+    if (!calibrate) {
+      float actualPosition = abs(destination) - actual;
+      if (destination < 0) {
+        actualPosition *= -1;
+      }
+
+      float newDestination = ((float)steps / 100.0) * (float)(set - coverage);
+
+      destination = newDestination + actualPosition;
+
+      coverage = set;
+      writeCoverage();
+
+      Serial.printf("\nBlinds moved by %i steps, now movement by %i steps. Changed state to %i", actual, (int)destination, set);
+      Serial.print('%');
+      actual = 0;
+    }
   }
 }
 
@@ -455,9 +480,20 @@ void cover(int lag) {
   for (int i = 0; i < 8; i++) {
     selectMuxPin(i);
 
-    digitalWrite(stepper_pin, HIGH);
-    delay(lag);
-    digitalWrite(stepper_pin, LOW);
+    bool cancel = false;
+    if (calibration != 0) {
+      if (calibration == 1) {
+        cancel = i > 3;
+      } else {
+      cancel = i < 4;
+      }
+    }
+
+    if (!cancel) {
+      digitalWrite(stepper_pin, HIGH);
+      delay(lag);
+      digitalWrite(stepper_pin, LOW);
+    }
   }
 }
 
@@ -465,21 +501,31 @@ void uncover(int lag) {
   for (int i = 7; i >= 0; i--) {
     selectMuxPin(i);
 
-    digitalWrite(stepper_pin, HIGH);
-    delay(lag);
-    digitalWrite(stepper_pin, LOW);
+    bool cancel = false;
+    if (calibration != 0) {
+      if (calibration == 1) {
+        cancel = i > 3;
+      } else {
+      cancel = i < 4;
+      }
+    }
+
+    if (!cancel) {
+      digitalWrite(stepper_pin, HIGH);
+      delay(lag);
+      digitalWrite(stepper_pin, LOW);
+    }
   }
 }
 
 void selectMuxPin(byte pin) {
-  if (pin > 7) {
-    return;
-  }
-  for (int i = 0; i < 3; i++) {
-    if (pin & (1 << i)) {
-      digitalWrite(multiplexer_pin[i], HIGH);
-    } else {
-      digitalWrite(multiplexer_pin[i], LOW);
+  if (pin < 8) {
+    for (int i = 0; i < 3; i++) {
+      if (pin & (1 << i)) {
+        digitalWrite(multiplexer_pin[i], HIGH);
+      } else {
+        digitalWrite(multiplexer_pin[i], LOW);
+      }
     }
   }
 }
