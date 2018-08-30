@@ -36,9 +36,13 @@ void setup() {
   readSteps();
   readCoverage();
   readSmart();
+  readSunset();
+  readSunrise();
 
   reversed = SD.exists("reversed.txt");
   Serial.printf("\n Engine set in the %s direction", reversed ? "opposite" : "right");
+
+  uprisingsCounter();
 
   if (readWiFiConfiguration()) {
     connectingToWifi();
@@ -64,6 +68,15 @@ void setupStepperPins() {
   digitalWrite(stepper_pin, LOW);
 }
 
+void uprisingsCounter() {
+  String s = readFromSD("uprisings");
+  if (s != "-1") {
+    uprisings = s.toInt() + 1;
+  }
+
+  Serial.printf("\n Uprisings: %i", uprisings);
+  writeOnSD("uprisings", String(uprisings), "", "// Licznik uruchomień urządzenia.");
+}
 
 void readSteps() {
   String s = readFromSD("steps");
@@ -79,6 +92,20 @@ void readCoverage() {
     coverage = s.toInt();
     Serial.printf("\n Coverage: %i", coverage);
     Serial.print('%');
+  }
+}
+
+void readSunset() {
+  String s = readFromSD("sunset");
+  if (s != "-1") {
+    sunset = s.toInt();
+  }
+}
+
+void readSunrise() {
+  String s = readFromSD("sunrise");
+  if (s != "-1") {
+    sunrise = s.toInt();
   }
 }
 
@@ -125,6 +152,7 @@ void handshake() {
     + "\",\"steps\":" + steps
     + ",\"rtc\":" + RTC.isrunning()
     + ",\"active\":" + active
+    + ",\"uprisings\":" + uprisings
     + ",\"reversed\":" + reversed + "}";
   } else {
     reply = "0";
@@ -257,22 +285,33 @@ void loop() {
 }
 
 bool daylightHasChanged() {
+  if (!RTC.isrunning()) {
+    return false;
+  }
+
+  DateTime now = RTC.now();
   int light = analogRead(twilight_pin);
   delay(3);
 
   if (twilight != (light < 100)) {
-    twilight = light < 100;
+    if (twilightLoopTime == 0) {
+      twilightLoopTime = now.unixtime();
+    } else {
+      if (twilightLoopTime + 60 < now.unixtime()) {
+        twilight = light < 100;
 
-    if (RTC.isrunning()) {
-      DateTime now = RTC.now();
+        if (twilight) {
+          sunset = now.unixtime();
+          writeOnSD("sunset", String(sunset), "", "// Czas zachodzu słońca.");
+        } else {
+          sunrise = now.unixtime();
+          writeOnSD("sunrise", String(sunrise), "", "// Czas wschodu słońca.");
+        }
 
-      if (twilight) {
-        sunset = now.unixtime();
-      } else {
-        sunrise = now.unixtime();
+        twilightLoopTime = 0;
+        return true;
       }
     }
-    return true;
   }
   return false;
 }
@@ -344,9 +383,10 @@ void setSmart() {
 
   String smart;
   String days;
-  bool coverAtNight;
-  int coverTime;
-  int uncoverTime;
+  bool loweringAtNight;
+  bool liftingAtDay;
+  int loweringTime;
+  int liftingTime;
 
   smartCount = 1;
   for (byte b: smartString) {
@@ -363,8 +403,8 @@ void setSmart() {
   for (int i = 0; i < smartCount; i++) {
     smart = get1Smart(smartString, i);
     if (smart.length() > 0 && strContains(smart, "b")) {
-      coverTime = strContains(smart, "_") ? smart.substring(0, smart.indexOf("_")).toInt() : -1;
-      uncoverTime = strContains(smart, "-") ? smart.substring(smart.indexOf("-") + 1, smart.length()).toInt() : -1;
+      loweringTime = strContains(smart, "_") ? smart.substring(0, smart.indexOf("_")).toInt() : -1;
+      liftingTime = strContains(smart, "-") ? smart.substring(smart.indexOf("-") + 1, smart.length()).toInt() : -1;
 
       smart = strContains(smart, "_") ? smart.substring(smart.indexOf("_") + 1, smart.length()) : smart;
       smart = strContains(smart, "-") ? smart.substring(0, smart.indexOf("-")) : smart;
@@ -378,9 +418,10 @@ void setSmart() {
       days += strContains(smart, "a") ? "a" : "";
       days += strContains(smart, "s") ? "s" : "";
 
-      coverAtNight = strContains(smart, "n");
+      loweringAtNight = strContains(smart, "n");
+      liftingAtDay = strContains(smart, "d");
 
-      smartArray[i] = (Smart) {days, coverAtNight, 0, coverTime, uncoverTime, 0};
+      smartArray[i] = (Smart) {days, loweringAtNight, liftingAtDay, 0, loweringTime, liftingTime, 0};
     }
   }
 }
@@ -397,7 +438,7 @@ void checkSmart() {
 
   for (int i = 0; i < smartCount; i++) {
     if (smartArray[i].access + 60 < now.unixtime()) {
-      if (smartArray[i].coverTime == currentTime
+      if (smartArray[i].loweringTime == currentTime
         && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
           blinds = 100;
           result = true;
@@ -405,7 +446,7 @@ void checkSmart() {
           serialPrint("The smart function activated the cover on time");
         }
 
-      if (smartArray[i].uncoverTime == currentTime
+      if (smartArray[i].liftingTime == currentTime
         && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1]) && currentTime < 360))) {
           blinds = 0;
           result = true;
@@ -414,20 +455,19 @@ void checkSmart() {
         }
     }
 
-    if (smartArray[i].coverAtNight
-      && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1]) && currentTime < 600))) {
-        if (twilight && (smartArray[i].blackout + 4320) < now.unixtime()) {
-          blinds = 100;
-          result = true;
-          smartArray[i].blackout = now.unixtime();
-          serialPrint("The smart function activated the cover at night");
-        }
-        if (!twilight && (smartArray[i].blackout + 4320) > now.unixtime()) {
-          blinds = 0;
-          result = true;
-          serialPrint("The smart function activated the uncover at day");
-        }
-      }
+    if (smartArray[i].loweringAtNight && twilight
+      && (smartArray[i].blackout + 72000) < now.unixtime() && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
+        blinds = 100;
+        result = true;
+        smartArray[i].blackout = now.unixtime();
+        serialPrint("The smart function activated lowering the blinds at night");
+    }
+    if (smartArray[i].liftingAtDay && !twilight
+      && (smartArray[i].blackout + 72000) > now.unixtime() && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1])) {
+        blinds = 0;
+        result = true;
+        serialPrint("The smart function activated lifting the blinds at day");
+    }
 
     if (result) {
       if (!offline) {

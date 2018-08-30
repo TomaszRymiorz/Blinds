@@ -1,12 +1,12 @@
 # Blinds 2
-Oprogramowanie rolety automatycznego domu. 
+Oprogramowanie rolety automatycznego domu.
 
 ### Roleta - podwójne okno
-Mechanizm rolety zbudowany jest w oparciu o WIFI D1 mini wraz z modułem Data logger (RTC DS1307 + MicroSD). Całości dopełniają dwa silniczki krokowe 28BYJ-48, każdy ze sterownikiem, multiplexer oraz fotorezystor pełniący funkcję czujnika zmierzchowego. 
+Mechanizm rolety zbudowany jest w oparciu o WIFI D1 mini wraz z modułem Data logger (RTC DS1307 + MicroSD). Całości dopełniają dwa silniczki krokowe 28BYJ-48, każdy ze sterownikiem, multiplexer oraz fotorezystor pełniący funkcję czujnika zmierzchowego.
 
 ### Możliwości
-Łączność z roletą odbywa się przez sieć Wi-Fi. 
-Dane dostępowe do routera przechowywane są wraz z innymi informacjami na karcie pamięci. Pozwala to uniknąć przykrych niespodzianek po zaniku prądu i daje możliwość szybkiego kopiowania ustawień między urządzeniami. 
+Łączność z roletą odbywa się przez sieć Wi-Fi.
+Dane dostępowe do routera przechowywane są wraz z innymi informacjami na karcie pamięci. Pozwala to uniknąć przykrych niespodzianek po zaniku prądu i daje możliwość szybkiego kopiowania ustawień między urządzeniami.
 W przypadku braku informacji o sieci, urządzenie aktywuje wyszukiwania routera z wykorzystaniem funkcji WPS.
 Roletę można ustawić w tryb online, wówczas będzie ona sprawdzać dedykowany Webservice i możliwe stanie się sterowanie przez Internet.
 
@@ -16,12 +16,13 @@ Zawiera czujnik światła wykorzystywany przez funkcje automatycznych ustawień.
 
 Roleta posiada opcję mierzenia wysokości okna, zmianę kierunku obrotów silnika oraz możliwość przesunięcie rolety o wskazaną wartość. Funkcja mierzenia okna wyklucza stosowanie niewygodnych ograniczników krańcowych, zapobiega pomyłkom błędnie podanych ręcznie wartości i ewentualnych różnic w silnikach w przypadku wartości zdefiniowanych programowo.
 
-Roleta wykorzystuje RTC do wywoływania ustawień automatycznych. 
+Roleta wykorzystuje RTC do wywoływania ustawień automatycznych.
 Ustawienia automatyczne obejmują opuszczanie i podnoszenie rolety o wybranej godzinie oraz opuszczanie po zapadnięciu zmroku i podnoszenie o świcie. Powtarzalność obejmuje okres jednego tygodnia, a ustawienia nie są ograniczone ilościowo. W celu zminimalizowania objętości wykorzystany został zapis tożsamy ze zmienną boolean, czyli dopiero wystąpienie znaku wskazuje na włączoną funkcję.
 
 * 'w' cały tydzień - występuje tylko w zapisie aplikacji w celu zminimalizowania ilości przesyłanych danych
 * 'o' poniedziałek, 'u' wtorek, 'e' środa, 'h' czwartek, 'r' piątek, 'a' sobota, 's' niedziela
-* 'n' opuść po zmroku / podnieś o świcie
+* 'n' opuść po zmroku
+* 'd' podnieś o świcie
 * '_' opuść o godzinie - jeśli znak występuje w zapisie, przed nim znajduje się godzina w zapisie czasu uniksowego
 * '-' podnieś o godzinie - jeśli występuje w zapisie, po nim znajduje się godzina w zapisie czasu uniksowego
 
@@ -30,7 +31,7 @@ Przykład zapisu trzech ustawień automatycznych: 1140_bw-420,basn,bouehrn-300
 Ustawienia automatyczne obejmują również włącznik światła, a obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
 
 ### Sterowanie
-Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protokole HTTP. Sterować można z przeglądarki lub dedykowanej aplikacji. 
+Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protokole HTTP. Sterować można z przeglądarki lub dedykowanej aplikacji.
 
 * "/hello" - Handshake wykorzystywany przez dedykowaną aplikację, służy do potwierdzenia tożsamości oraz przesłaniu wszystkich parametrów pracy rolety.
 

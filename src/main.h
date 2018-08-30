@@ -9,10 +9,11 @@ const int multiplexer_pin[] = {D5, D6, D7};
 
 struct Smart {
   String days;
-  bool coverAtNight;
+  bool loweringAtNight;
+  bool liftingAtDay;
   uint32_t blackout;
-  int coverTime;
-  int uncoverTime;
+  int loweringTime;
+  int liftingTime;
   uint32_t access;
 };
 
@@ -28,12 +29,16 @@ bool measurement = false;
 int measure = 0;
 int calibration = 0;
 
+uint32_t twilightLoopTime = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
 
 void setupStepperPins();
+void uprisingsCounter();
 void readSteps();
 void readCoverage();
+void readSunset();
+void readSunrise();
 void writeSteps();
 void writeCoverage();
 void startRestServer();

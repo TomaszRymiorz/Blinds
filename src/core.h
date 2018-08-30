@@ -21,6 +21,7 @@ const String database = "idom";
 bool reconnect = false;
 uint32_t loopTime = 0;
 uint32_t start = 0;
+int uprisings = 1;
 
 bool offline = true;
 String twin = "0";
