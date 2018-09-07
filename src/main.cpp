@@ -42,13 +42,13 @@ void setup() {
   reversed = SD.exists("reversed.txt");
   Serial.printf("\n Engine set in the %s direction", reversed ? "opposite" : "right");
 
-  uprisingsCounter();
-
   if (readWiFiConfiguration()) {
     connectingToWifi();
   } else {
     initiatingWPS();
   }
+
+  uprisingsCounter();
 
   setupStepperPins();
 
@@ -193,6 +193,7 @@ void reverseDirection() {
   SPI.end();
   setupStepperPins();
   Serial.printf("\nEngine set in the %s direction", reversed ? "opposite" : "right");
+  server.send(200, "text/plain", "Done");
 }
 
 void resetCoverage() {
@@ -233,6 +234,22 @@ void loop() {
     return;
   }
 
+  if (daylightHasChanged()) {
+    if (offline) {
+      postToTwin("{\"twilight\":" + String(twilight) + "}");
+    } else {
+      putDataOnServer("twilight=" + String(twilight));
+    }
+  }
+
+  if (timeHasChanged()) {
+    if (!offline) {
+      getOnlineData();
+    }
+
+    checkSmart();
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
     if (reconnect) {
       serialPrint("Reconnection with Wi-Fi");
@@ -265,22 +282,6 @@ void loop() {
     coverage = 100;
     writeCoverage();
     return;
-  }
-
-  if (daylightHasChanged()) {
-    if (offline) {
-      postToTwin("{\"twilight\":" + String(twilight) + "}");
-    } else {
-      putDataOnServer("twilight=" + String(twilight));
-    }
-  }
-
-  if (timeHasChanged()) {
-    if (!offline) {
-      getOnlineData();
-    }
-
-    checkSmart();
   }
 }
 

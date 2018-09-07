@@ -222,6 +222,9 @@ void writeOnSD(String file, String value1, String value2, String comment) {
 bool connectingToWifi() {
   serialPrint("Connecting to Wi-Fi");
 
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
   WiFi.begin(ssid.c_str(), password.c_str());
   int timeout = 0;
   while (timeout++ < 20 && WiFi.status() != WL_CONNECTED) {
