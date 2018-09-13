@@ -19,10 +19,10 @@ void setup() {
 
   Serial.print("\n RTC initialization ");
   Wire.begin();
-  if (!RTC.begin()) {
-    Serial.print("failed");
-  } else {
+  if (RTC.begin()) {
     Serial.print("completed");
+  } else {
+    Serial.print("failed");
   }
 
   if (!RTC.isrunning()) {
@@ -53,8 +53,7 @@ void setup() {
   setupStepperPins();
 
   if (RTC.isrunning()) {
-    DateTime now = RTC.now();
-    start = now.unixtime();
+    start = RTC.now().unixtime();
   }
 }
 
@@ -66,16 +65,6 @@ void setupStepperPins() {
 
   pinMode(stepper_pin, OUTPUT);
   digitalWrite(stepper_pin, LOW);
-}
-
-void uprisingsCounter() {
-  String s = readFromSD("uprisings");
-  if (s != "-1") {
-    uprisings = s.toInt() + 1;
-  }
-
-  Serial.printf("\n Uprisings: %i", uprisings);
-  writeOnSD("uprisings", String(uprisings), "", "// Licznik uruchomień urządzenia.");
 }
 
 void readSteps() {
@@ -139,13 +128,13 @@ void handshake() {
 
     uint32_t active = 0;
     if (RTC.isrunning()) {
-      DateTime now = RTC.now();
-      active = now.unixtime() - start;
+      active = RTC.now().unixtime() - start;
     }
 
     reply = "{\"id\":\"" +  WiFi.macAddress()
     + "\",\"coverage\":" + coverage
     + ",\"twilight\":" + twilight
+    + ",\"sensor\":" + daylight
     + ",\"sunset\":" + (sunset > 0 ? (sunset - offset) : 0)
     + ",\"sunrise\":" + (sunrise > 0 ? (sunrise - offset) : 0)
     + ",\"smart\":\"" + smartString
@@ -235,6 +224,7 @@ void loop() {
   }
 
   if (daylightHasChanged()) {
+    checkSmart(true);
     if (offline) {
       postToTwin("{\"twilight\":" + String(twilight) + "}");
     } else {
@@ -247,7 +237,7 @@ void loop() {
       getOnlineData();
     }
 
-    checkSmart();
+    checkSmart(false);
   }
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -291,15 +281,15 @@ bool daylightHasChanged() {
   }
 
   DateTime now = RTC.now();
-  int light = analogRead(twilight_pin);
+  daylight = analogRead(twilight_pin);
   delay(3);
 
-  if (twilight != (light < 100)) {
+  if (twilight != (daylight < 100) && (daylight < 90 || daylight > 110)) {
     if (twilightLoopTime == 0) {
       twilightLoopTime = now.unixtime();
     } else {
       if (twilightLoopTime + 60 < now.unixtime()) {
-        twilight = light < 100;
+        twilight = daylight < 100;
 
         if (twilight) {
           sunset = now.unixtime();
@@ -313,7 +303,10 @@ bool daylightHasChanged() {
         return true;
       }
     }
+  } else {
+    twilightLoopTime = 0;
   }
+
   return false;
 }
 
@@ -427,47 +420,51 @@ void setSmart() {
   }
 }
 
-void checkSmart() {
+void checkSmart(bool daynight) {
   if (!RTC.isrunning()) {
     return;
   }
 
   DateTime now = RTC.now();
   int currentTime = (now.hour() * 60) + now.minute();
-  bool result = false;
   int blinds = 0;
+  bool result = false;
 
   for (int i = 0; i < smartCount; i++) {
-    if (smartArray[i].access + 60 < now.unixtime()) {
-      if (smartArray[i].loweringTime == currentTime
-        && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
+    result = false;
+
+    if (daynight) {
+      if (smartArray[i].loweringAtNight && twilight
+        && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])
+        && (smartArray[i].blackout + 72000) < now.unixtime()) {
           blinds = 100;
           result = true;
-          smartArray[i].access = now.unixtime();
-          serialPrint("The smart function activated the cover on time");
+          smartArray[i].blackout = now.unixtime();
+          serialPrint("The smart function activated lowering the blinds at night");
         }
-
-      if (smartArray[i].liftingTime == currentTime
-        && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1]) && currentTime < 360))) {
+      if (smartArray[i].liftingAtDay && !twilight
+        && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1])) {
           blinds = 0;
           result = true;
-          smartArray[i].access = now.unixtime();
-          serialPrint("The smart function activated the uncover time");
+          serialPrint("The smart function activated lifting the blinds at day");
         }
-    }
-
-    if (smartArray[i].loweringAtNight && twilight
-      && (smartArray[i].blackout + 72000) < now.unixtime() && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
-        blinds = 100;
-        result = true;
-        smartArray[i].blackout = now.unixtime();
-        serialPrint("The smart function activated lowering the blinds at night");
-    }
-    if (smartArray[i].liftingAtDay && !twilight
-      && (smartArray[i].blackout + 72000) > now.unixtime() && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1])) {
-        blinds = 0;
-        result = true;
-        serialPrint("The smart function activated lifting the blinds at day");
+    } else {
+      if (smartArray[i].access + 60 < now.unixtime()) {
+        if (smartArray[i].loweringTime == currentTime
+          && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
+            blinds = 100;
+            result = true;
+            smartArray[i].access = now.unixtime();
+            serialPrint("The smart function activated the cover on time");
+          }
+        if (smartArray[i].liftingTime == currentTime
+          && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() - 1]) && currentTime < 360))) {
+            blinds = 0;
+            result = true;
+            smartArray[i].access = now.unixtime();
+            serialPrint("The smart function activated the uncover time");
+          }
+      }
     }
 
     if (result) {

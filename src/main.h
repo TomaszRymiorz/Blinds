@@ -33,8 +33,9 @@ uint32_t twilightLoopTime = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
 
+int daylight = 100;
+
 void setupStepperPins();
-void uprisingsCounter();
 void readSteps();
 void readCoverage();
 void readSunset();
@@ -51,7 +52,7 @@ void makeMeasurement();
 bool daylightHasChanged();
 int readData(String payload);
 void setSmart();
-void checkSmart();
+void checkSmart(bool daynight);
 void setCoverage(int set, bool calibrate);
 void cover(int lag);
 void uncover(int lag);

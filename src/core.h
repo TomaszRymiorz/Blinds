@@ -39,6 +39,7 @@ bool twilight = false;
 bool strContains(String text, String value);
 bool timeHasChanged();
 void serialPrint(String text);
+void uprisingsCounter();
 void readOffset();
 void readSmart();
 String readFromSD(String file);
@@ -61,8 +62,7 @@ bool strContains(String text, String value) {
 
 bool timeHasChanged() {
   if (!RTC.isrunning()) {
-    delay(1000);
-    return true;
+    return false;
   }
 
   DateTime now = RTC.now();
@@ -94,6 +94,16 @@ void serialPrint(String text) {
   Serial.print(text);
 }
 
+
+void uprisingsCounter() {
+  String s = readFromSD("uprisings");
+  if (s != "-1") {
+    uprisings = s.toInt() + 1;
+  }
+
+  Serial.printf("\n Uprisings: %i", uprisings);
+  writeOnSD("uprisings", String(uprisings), "", "// Licznik uruchomień urządzenia.");
+}
 
 void readOffset() {
   String s = readFromSD("offset");
@@ -325,11 +335,7 @@ void putDataOnServer(String values) {
 }
 
 void postToTwin(String values) {
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-
-  if (twin.length() < 2) {
+  if (WiFi.status() != WL_CONNECTED || twin.length() < 2) {
     return;
   }
 
