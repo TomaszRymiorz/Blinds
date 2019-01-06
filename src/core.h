@@ -1,6 +1,6 @@
 #include <Wire.h>
 #include <SPI.h>
-#include <SdFat.h>
+#include <FS.h>
 #include <RTClib.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -8,52 +8,50 @@
 #include <ArduinoJson.h>
 #include "main.h"
 
-SdFat SD;
 RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
+const int version = 5;
+const bool offline = true;
+const String baseURL = "";
+
 const char daysOfTheWeek[7][12] = {"s", "o", "u", "e", "h", "r", "a"};
-
-const String baseURL = "http://";
-const String database = "idom";
-
-bool reconnect = false;
-uint32_t loopTime = 0;
-uint32_t start = 0;
-int uprisings = 1;
-
-bool offline = true;
-String twin = "0";
-int offset = 0;
 
 String ssid;
 String password;
 
-Smart *smartArray;
+uint32_t start = 0;
+int uprisings = 1;
+bool reconnect = false;
+uint32_t loopTime = 0;
+uint32_t updateTime = 0;
+
+String twin;
+int offset = 0;
+
 String smartString = "0";
+Smart *smartArray;
 int smartCount = 0;
 
 bool twilight = false;
+bool sendingError = false;
+bool blockOnlineData = false;
 
 bool strContains(String text, String value);
 bool timeHasChanged();
-void serialPrint(String text);
-void uprisingsCounter();
-void readOffset();
-void readSmart();
-String readFromSD(String file);
-bool readWiFiConfiguration();
-void writeOffset();
-void writeSmart();
-void writeWiFiConfiguration();
-void writeOnSD(String file, String value1, String value2, String text);
+void writeLog(String text);
+bool writeObjectToFile(String name, JsonObject& jsonObject);
 bool connectingToWifi();
 bool initiatingWPS();
-String get1Smart(String smartString, int index);
+void receivedTheData();
+void requestForLogs();
+void clearLogs();
+void deleteWiFiSettings();
+String get1Smart(int index);
 void getOnlineData();
-void putDataOnServer(String values);
-void postToTwin(String request);
+void putDataOnline(String variant, String values);
+void postDataToTheTwin(String request);
 
 
 bool strContains(String text, String value) {
@@ -61,180 +59,68 @@ bool strContains(String text, String value) {
 }
 
 bool timeHasChanged() {
-  if (!RTC.isrunning()) {
-    return false;
+  uint32_t currentTime = RTC.isrunning() ? RTC.now().unixtime() : millis() / 1000;
+  if (abs(currentTime - loopTime) >= 1) {
+    loopTime = currentTime;
+    return true;
   }
-
-  DateTime now = RTC.now();
-  bool changed = loopTime != now.unixtime();
-  loopTime = now.unixtime();
-  return changed;
+  return false;
 }
 
-void serialPrint(String text) {
-  Serial.print("\n");
 
+void writeLog(String text) {
+  if (text == "") {
+    return;
+  }
+
+  String logs = strContains(text, "iDom") ? "\n[" : "[";
   if (RTC.isrunning()) {
     DateTime now = RTC.now();
-    Serial.print('[');
-    Serial.print(now.day(), DEC);
-    Serial.print('.');
-    Serial.print(now.month(), DEC);
-    Serial.print('.');
-    Serial.print(now.year(), DEC);
-    Serial.print(" ");
-    Serial.print(now.hour(), DEC);
-    Serial.print(':');
-    Serial.print(now.minute(), DEC);
-    Serial.print(':');
-    Serial.print(now.second(), DEC);
-    Serial.print("] ");
-  }
-
-  Serial.print(text);
-}
-
-
-void uprisingsCounter() {
-  String s = readFromSD("uprisings");
-  if (s != "-1") {
-    uprisings = s.toInt() + 1;
-  }
-
-  Serial.printf("\n Uprisings: %i", uprisings);
-  writeOnSD("uprisings", String(uprisings), "", "// Licznik uruchomień urządzenia.");
-}
-
-void readOffset() {
-  String s = readFromSD("offset");
-  if (s != "-1") {
-    offset = s.toInt();
-    Serial.printf("\n Offset: %i", offset);
-  }
-}
-
-void readSmart() {
-  String s = readFromSD("smart");
-  if (s != "-1") {
-    smartString = s;
-    Serial.printf("\n Smart: %s", smartString.c_str());
-    setSmart();
-  }
-}
-
-String readFromSD(String file) {
-  SdFile rdfile((file + ".txt").c_str(), O_READ);
-
-  if (rdfile.isOpen()) {
-    int lineNo = 0;
-    char line[25];
-    int n;
-    String s;
-
-    while ((n = rdfile.fgets(line, sizeof(line))) > 0) {
-      if (line[n - 1] == '\n') {
-        switch (lineNo++) {
-          case 0:
-            s += line;
-            s.trim();
-            break;
-        }
-      }
-    }
-    rdfile.close();
-    return s;
+    logs += now.day();
+    logs += ".";
+    logs += now.month();
+    logs += ".";
+    logs += String(now.year()).substring(2, 4);
+    logs += " ";
+    logs += now.hour();
+    logs += ":";
+    logs += now.minute();
+    logs += ":";
+    logs += now.second();
   } else {
-    return "-1";
+    logs += millis() / 1000;
   }
+  logs += "] " + text;
+
+  File file = SPIFFS.open("/log.txt", "a");
+  if (file) {
+    file.println(logs);
+    file.close();
+  }
+  Serial.print("\n" + logs);
 }
 
-bool readWiFiConfiguration() {
-  Serial.print("\nOpening the Wi-Fi settings file");
-  SdFile rdfile("wifi.txt", O_READ);
+bool writeObjectToFile(String name, JsonObject& jsonObject) {
+  name = "/" + name + ".txt";
 
-  if (rdfile.isOpen()) {
-    int lineNo = 0;
-    char line[25];
-    int n;
-    String s;
-    String p;
-
-    while ((n = rdfile.fgets(line, sizeof(line))) > 0) {
-      if (line[n - 1] == '\n') {
-        switch (lineNo++) {
-          case 0:
-            s = line;
-            s.trim();
-            ssid = s;
-            Serial.print("\n SSID: " + s);
-            break;
-
-          case 1:
-            p = line;
-            p.trim();
-            password = p;
-            Serial.print("\n PASSWORD: " + p);
-            break;
-        }
-      }
-    }
-
-    rdfile.close();
-    reconnect = true;
+  File file = SPIFFS.open(name, "w");
+  if (file) {
+    jsonObject.printTo(file);
+    file.close();
     return true;
-  } else {
-    Serial.print(" failed");
-    return false;
   }
-}
-
-
-void writeOffset() {
-  writeOnSD("offset", String(offset), "", "// Przesunięcie strefy czasowej z uwzględnieniem czasu letniego wyrażone w liczbie sekund. UTC+01:00 = 3600");
-}
-
-void writeSmart() {
-  writeOnSD("smart", smartString, "", "// Automatyczne ustawienia urządzenia.");
-}
-
-void writeWiFiConfiguration() {
-  ssid = WiFi.SSID();
-  ssid.trim();
-  password = WiFi.psk();
-  password.trim();
-
-  writeOnSD("wifi", ssid, password, "// Dane dostępowe do lokalnej sieci Wi-Fi. Pierwsza linia zawiera SSID sieci Wi-Fi, druga hasło dostępu do sieci.");
-}
-
-void writeOnSD(String file, String value1, String value2, String comment) {
-  Serial.printf("\nSaving the %s (%s) on the SD card", file.c_str(), value1.c_str());
-
-  SPI.begin();
-  if (SD.exists((file + ".txt").c_str())) {
-    SD.remove((file + ".txt").c_str());
-  }
-
-  File wrfile = SD.open((file + ".txt").c_str(), FILE_WRITE);
-  if (wrfile) {
-    wrfile.println(value1);
-    if (value2.length() > 0 ) {
-      wrfile.println(value2);
-    }
-    wrfile.println(comment);
-    wrfile.close();
-  } else {
-    Serial.print(" failed");
-  }
-  SPI.end();
+  return false;
 }
 
 
 bool connectingToWifi() {
-  serialPrint("Connecting to Wi-Fi");
+  String logs = "Connecting to Wi-Fi";
+  Serial.print("\n" + logs);
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
+
   WiFi.begin(ssid.c_str(), password.c_str());
   int timeout = 0;
   while (timeout++ < 20 && WiFi.status() != WL_CONNECTED) {
@@ -242,22 +128,29 @@ bool connectingToWifi() {
     delay(500);
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print(" finished");
-    Serial.printf("\n Connected to %s", WiFi.SSID().c_str());
-    Serial.printf("\n IP address: %s", WiFi.localIP().toString().c_str());
+  bool result = WiFi.status() == WL_CONNECTED;
 
-    startRestServer();
-    reconnect = true;
-    return true;
+  if (result) {
+    logs += " finished";
+    logs += "\n Connected to " + WiFi.SSID();
+    logs += "\n IP address: " + WiFi.localIP().toString();
   } else {
-    Serial.print(" timed out");
-    return false;
+    logs += " timed out";
   }
+
+  writeLog(logs);
+
+  if (result) {
+    startRestServer();
+    sayHelloToTheServer();
+    reconnect = true;
+  }
+  return result;
 }
 
 bool initiatingWPS() {
-  serialPrint("Initiating WPS");
+  String logs = "Initiating WPS";
+  Serial.print("\n" + logs);
 
   WiFi.beginWPSConfig();
   int timeout = 0;
@@ -266,23 +159,74 @@ bool initiatingWPS() {
     delay(500);
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print(" finished");
-    Serial.printf("\n Connected to %s", WiFi.SSID().c_str());
-    Serial.printf("\n IP address: %s\n", WiFi.localIP().toString().c_str());
+  bool result = WiFi.status() == WL_CONNECTED;
 
-    writeWiFiConfiguration();
+  if (result) {
+    ssid = WiFi.SSID();
+    password = WiFi.psk();
+    logs += " finished";
+    logs += "\n Connected to " + WiFi.SSID();
+    logs += "\n IP address: " + WiFi.localIP().toString();
+
+    saveTheSettings();
     startRestServer();
+    sayHelloToTheServer();
     reconnect = true;
-    return true;
   } else {
-    Serial.print(" time out");
-    return false;
+    logs += " time out";
   }
+
+  writeLog(logs);
+  return result;
 }
 
 
-String get1Smart(String smartString, int index) {
+void receivedTheData() {
+  if (server.hasArg("plain")) {
+    server.send(200, "text/plain", "Data has received");
+    readData(server.arg("plain"), true);
+    return;
+  }
+
+  server.send(200, "text/plain", "Body not received");
+}
+
+void requestForLogs() {
+  File file = SPIFFS.open("/log.txt", "r");
+  if (!file) {
+    server.send(404, "text/plain", "There are no log file");
+    return;
+  }
+  Serial.print("\nA log file was requested");
+
+  server.setContentLength(file.size() + String("Log file\n").length());
+  server.send (200, "text/html", "Log file\n");
+  while (file.available()) {
+    server.sendContent(String(char(file.read())));
+  }
+  file.close();
+}
+
+void clearLogs() {
+  if (SPIFFS.exists("/log.txt")) {
+    SPIFFS.remove("/log.txt");
+    server.send(200, "text/plain", "Done");
+    Serial.print("\nThe log file was cleared");
+  } else {
+    server.send(404, "text/plain", "Failed!");
+  }
+}
+
+void deleteWiFiSettings() {
+  ssid = "";
+  password = "";
+  writeLog("Wi-Fi settings have been removed");
+  saveTheSettings();
+  server.send(200, "text/plain", "Done");
+}
+
+
+String get1Smart(int index) {
   int found = 0;
   int strIndex[] = {0, -1};
   int maxIndex = smartString.length() - 1;
@@ -299,51 +243,70 @@ String get1Smart(String smartString, int index) {
 
 
 void getOnlineData() {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED || offline || blockOnlineData) {
     return;
   }
 
-  int status = 0;
+  if (sendingError) {
+    sayHelloToTheServer();
+    // return;
+  }
 
-  while (status == 0) {
-    HTTP.begin(baseURL + "/detail/" + device + "/?db=" + database + "&id=" + WiFi.macAddress() + "&web=" + WiFi.SSID());
-    int httpCode = HTTP.GET();
+  blockOnlineData = true;
 
-    if (httpCode > 0) {
-      if (httpCode == HTTP_CODE_OK) {
-        status = readData(HTTP.getString());
-      }
-    } else {
-      serialPrint("HTTP GET... failed, error: " + HTTP.errorToString(httpCode));
+  HTTP.begin(baseURL + "/detail/" + device + "/?id=" + WiFi.macAddress() + "&up=" + updateTime);
+  int httpCode = HTTP.GET();
+
+  if (httpCode > 0) {
+    if (httpCode == HTTP_CODE_OK) {
+      readData(HTTP.getString(), false);
+      blockOnlineData = false;
     }
-
-    HTTP.end();
-  }
-}
-
-void putDataOnServer(String values) {
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
+  } else {
+    Serial.print(".");
+    blockOnlineData = false;
   }
 
-  HTTP.begin(baseURL + "/detail/" + device + "/?db=" + database + "&id=" + WiFi.macAddress() + "&web=" + WiFi.SSID() + "&" + values);
-  HTTP.addHeader("Accept", "application/json, text/plain, */*");
-  HTTP.addHeader("Content-Type", "application/json;charset=utf-8");
-  HTTP.PUT("");
-  // HTTP.sendRequest("PUT", "");
   HTTP.end();
 }
 
-void postToTwin(String values) {
-  if (WiFi.status() != WL_CONNECTED || twin.length() < 2) {
+void putDataOnline(String variant, String values) {
+  if (offline) {
     return;
   }
 
-  Serial.print("\nSending data to a twin");
+  if (WiFi.status() != WL_CONNECTED) {
+    sendingError = true;
+    return;
+  }
+
+  HTTP.begin(baseURL + "/" + variant + "/" + device + "/?id=" + WiFi.macAddress() + "&" + values);
+  int httpCode = HTTP.PUT("");
+
+  if (httpCode > 0) {
+    if (httpCode == HTTP_CODE_OK) {
+      writeLog("Data sent to the server:\n {" + values + "}");
+      readData(HTTP.getString(), false);
+      sendingError = false;
+    }
+  } else {
+    if (!sendingError) {
+      writeLog("Failure to send data to the server:\n {" + values + "}");
+    }
+    sendingError = true;
+  }
+
+  HTTP.end();
+}
+
+void postDataToTheTwin(String values) {
+  if (WiFi.status() != WL_CONNECTED || !offline || twin.length() < 2) {
+    return;
+  }
+
+  writeLog("Sending data to a twin:\n {" + values + "}");
 
   HTTP.begin("http://" + twin + "/set");
-  HTTP.addHeader("Accept", "application/json, text/plain, */*");
-  HTTP.addHeader("Content-Type", "application/json;charset=utf-8");
   HTTP.PUT(values);
   HTTP.end();
 }

@@ -8,7 +8,6 @@ Mechanizm rolety zbudowany jest w oparciu o WIFI D1 mini wraz z modułem Data lo
 Łączność z roletą odbywa się przez sieć Wi-Fi.
 Dane dostępowe do routera przechowywane są wraz z innymi informacjami na karcie pamięci. Pozwala to uniknąć przykrych niespodzianek po zaniku prądu i daje możliwość szybkiego kopiowania ustawień między urządzeniami.
 W przypadku braku informacji o sieci, urządzenie aktywuje wyszukiwania routera z wykorzystaniem funkcji WPS.
-Roletę można ustawić w tryb online, wówczas będzie ona sprawdzać dedykowany Webservice i możliwe stanie się sterowanie przez Internet.
 
 Roleta automatycznie łączy się z zaprogramowaną siecią Wi-Fi w przypadku utraty połączenia.
 
@@ -25,6 +24,7 @@ Ustawienia automatyczne obejmują opuszczanie i podnoszenie rolety o wybranej go
 * 'd' podnieś o świcie
 * '_' opuść o godzinie - jeśli znak występuje w zapisie, przed nim znajduje się godzina w zapisie czasu uniksowego
 * '-' podnieś o godzinie - jeśli występuje w zapisie, po nim znajduje się godzina w zapisie czasu uniksowego
+* '/' wyłącz ustawienie - obecność znaku wskazuje, że ustawienie będzie ignorowane
 
 Przykład zapisu trzech ustawień automatycznych: 1140_bw-420,basn,bouehrn-300
 

@@ -1,19 +1,21 @@
 #include <Arduino.h>
 
-const String device = "blinds"; //switch
+const String device = "blinds";
 
-const int sd_pin = D8;
-const int twilight_pin = A0;
+const int light_pin = A0;
 const int stepper_pin = D0;
 const int multiplexer_pin[] = {D5, D6, D7};
+
+const int dayBoundary = 40;
+const int lag = 4;
 
 struct Smart {
   String days;
   bool loweringAtNight;
   bool liftingAtDay;
-  uint32_t blackout;
   int loweringTime;
   int liftingTime;
+  bool enabled;
   uint32_t access;
 };
 
@@ -23,7 +25,6 @@ int actual = 0;
 
 int steps = 0;
 bool reversed = false;
-const int lag = 4;
 
 bool measurement = false;
 int measure = 0;
@@ -33,27 +34,25 @@ uint32_t twilightLoopTime = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
 
-int daylight = 100;
+int light = 0;
 
 void setupStepperPins();
-void readSteps();
-void readCoverage();
-void readSunset();
-void readSunrise();
-void writeSteps();
-void writeCoverage();
+void readSettings();
+void resume();
+void saveTheState();
+void saveTheSettings();
+void sayHelloToTheServer() ;
 void startRestServer();
 void handshake();
 void requestForState();
-void receivedTheData();
 void reverseDirection();
 void resetCoverage();
 void makeMeasurement();
-bool daylightHasChanged();
-int readData(String payload);
+bool lightHasChanged();
+void readData(String payload, bool perWiFi);
 void setSmart();
 void checkSmart(bool daynight);
 void setCoverage(int set, bool calibrate);
 void cover(int lag);
 void uncover(int lag);
-void selectMuxPin(byte pin);
+void rotation(byte pin);
