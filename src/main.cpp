@@ -177,7 +177,7 @@ void saveTheSettings() {
 void sayHelloToTheServer() {
   if (!offline) {
     String request = "ip=" + WiFi.localIP().toString()
-    + "&deets=" + steps + "," + RTC.isrunning() + "," + start + "," + reversed + "," + uprisings
+    + "&deets=" + steps + "," + RTC.isrunning() + "," + start + "," + reversed + "," + uprisings + "," + version
     + "&tw=" + String(twilight) + "," + light;
 
     if (sendingError) {
@@ -601,9 +601,10 @@ void setCoverage(int set, bool calibrate) {
       }
       destination = (((float)steps / 100.0) * (float)(set - coverage)) + actualPosition;
       coverage = set;
-      actual = 0;
 
       writeLog("Blinds moved by " + String(actual) + " steps, now movement by " + String((int)destination) + " steps. Changed state to " + set + "%");
+      actual = 0;
+
       saveTheSettings();
       saveTheState();
     }
