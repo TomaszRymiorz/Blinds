@@ -6,7 +6,7 @@ const int light_pin = A0;
 const int stepper_pin = D0;
 const int multiplexer_pin[] = {D5, D6, D7};
 
-const int dayBoundary = 40;
+const int dayBoundary = 60;
 const int lag = 4;
 
 struct Smart {
@@ -51,7 +51,7 @@ void makeMeasurement();
 bool lightHasChanged();
 void readData(String payload, bool perWiFi);
 void setSmart();
-void checkSmart(bool daynight);
+void checkSmart(bool lightHasChanged);
 void setCoverage(int set, bool calibrate);
 void cover(int lag);
 void uncover(int lag);
