@@ -19,11 +19,11 @@ void setup() {
     start = RTC.now().unixtime() - offset;
   }
 
-  light = analogRead(light_pin);
+  light = analogRead(light_sensor_pin);
   twilight = light < 100;
   twilightLoopTime = RTC.isrunning() ? RTC.now().unixtime() : millis() / 1000;
 
-  setupStepperPins();
+  setupStepperPins(true);
 
   if (ssid != "" && password != "") {
     connectingToWifi();
@@ -32,14 +32,13 @@ void setup() {
   }
 }
 
-void setupStepperPins() {
-  for (int i = 0; i < 3; i++) {
-    pinMode(multiplexer_pin[i], OUTPUT);
-    digitalWrite(multiplexer_pin[i], LOW);
+void setupStepperPins(bool mode) {
+  for (int i = 0; i < 4; i++) {
+    if (mode) {
+      pinMode(stepper_pin[i], OUTPUT);
+    }
+    digitalWrite(stepper_pin[i], LOW);
   }
-
-  pinMode(stepper_pin, OUTPUT);
-  digitalWrite(stepper_pin, LOW);
 }
 
 
@@ -84,6 +83,9 @@ void readSettings() {
   }
   if (jsonObject.containsKey("steps")) {
     steps = jsonObject["steps"].as<int>();
+  }
+  if (jsonObject.containsKey("boundary")) {
+    steps = jsonObject["boundary"].as<int>();
   }
   if (jsonObject.containsKey("reversed")) {
     reversed = jsonObject["reversed"].as<bool>();
@@ -161,6 +163,7 @@ void saveTheSettings() {
   jsonObject["sunset"] = sunset;
   jsonObject["sunrise"] = sunrise;
   jsonObject["steps"] = steps;
+  jsonObject["boundary"] = dayBoundary;
   jsonObject["coverage"] = coverage;
   jsonObject["reversed"] = reversed;
 
@@ -177,7 +180,7 @@ void saveTheSettings() {
 void sayHelloToTheServer() {
   if (!offline) {
     String request = "ip=" + WiFi.localIP().toString()
-    + "&deets=" + steps + "," + RTC.isrunning() + "," + start + "," + reversed + "," + uprisings + "," + version
+    + "&deets=" + steps + "," + RTC.isrunning() + "," + start + "," + reversed + "," + uprisings + "," + version + "," + dayBoundary
     + "&tw=" + String(twilight) + "," + light;
 
     if (sendingError) {
@@ -209,7 +212,7 @@ void startRestServer() {
 void handshake() {
   readData(server.arg("plain"), true);
 
-  String reply = "{\"id\":\"" +  WiFi.macAddress()
+  String reply = "{\"id\":\"" + WiFi.macAddress()
   + "\",\"version\":" + version
   + ",\"value\":" + coverage
   + ",\"twilight\":\"" + twilight + "," + light
@@ -217,9 +220,11 @@ void handshake() {
   + ",\"sunrise\":" + (sunrise > 0 ? sunrise : 0)
   + ",\"smart\":\"" + smartString
   + "\",\"steps\":" + steps
+  + ",\"boundary\":" + dayBoundary
   + ",\"rtc\":" + RTC.isrunning()
   + ",\"active\":" + (RTC.isrunning() ? (RTC.now().unixtime() - offset) - start : 0)
   + ",\"uprisings\":" + uprisings
+  + ",\"offline\":" + offline
   + ",\"reversed\":" + reversed + "}";
 
   writeLog("Shake hands");
@@ -230,7 +235,7 @@ void requestForState() {
   String reply = "{\"state\":\"" + String(coverage) + ","
   + light
   + (twilight ? "t" : "")
-  + (measure > 0 ?  "-" + measure : "") + "\"}";
+  + (measure > 0 ?  "-" + String(measure) : "") + "\"}";
 
   server.send(200, "text/plain", reply);
 }
@@ -238,7 +243,7 @@ void requestForState() {
 void reverseDirection() {
   reversed = !reversed;
   saveTheSettings();
-  writeLog("Engine set in the %s direction" + String(reversed ? "opposite" : "right"));
+  writeLog("Engine set in the " + String(reversed ? "opposite" : "right") +  " direction");
   server.send(200, "text/plain", "Done");
   sayHelloToTheServer();
 }
@@ -259,6 +264,7 @@ void makeMeasurement() {
     steps = measure;
     measure = 0;
     coverage = 100;
+    setupStepperPins(false);
     saveTheSettings();
     sayHelloToTheServer();
   }
@@ -267,8 +273,9 @@ void makeMeasurement() {
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-    if (reconnect) {
+    if (ssid != "" && password != "") {
       writeLog("Reconnection with Wi-Fi");
+
       if (!connectingToWifi()) {
         initiatingWPS();
       }
@@ -285,11 +292,8 @@ void loop() {
 
   if (measurement) {
     measure++;
-    if (reversed) {
-      uncover(lag);
-    } else {
-      cover(lag);
-    }
+    rotation();
+    delay(1);
     return;
   }
 
@@ -297,30 +301,21 @@ void loop() {
     if (loopTime % 2 == 0) {
       getOnlineData();
     }
+    if (destination != 0) {
+      saveTheState();
+    }
     checkSmart(lightHasChanged());
   }
 
   if (destination != 0) {
     if (actual < abs(destination)) {
       actual++;
-      if (destination > 0) {
-        if (reversed) {
-          uncover(lag);
-        } else {
-          cover(lag);
-        }
-      } else {
-        if (reversed) {
-          cover(lag + 1);
-        } else {
-          uncover(lag + 1);
-        }
-      }
-      saveTheState();
+      rotation();
+      delay(1);
     } else {
       Serial.printf("\nBlinds has reached the target position %i%s", coverage, "%");
       destination = 0;
-      calibration = 0;
+      setupStepperPins(false);
       if (SPIFFS.exists("/resume.txt")) {
         SPIFFS.remove("/resume.txt");
       }
@@ -330,21 +325,26 @@ void loop() {
 
 
 bool lightHasChanged() {
+  if (destination != 0) {
+    return false;
+  }
+
   DateTime now = RTC.now();
   bool result = false;
 
   if (abs((RTC.isrunning() ? now.unixtime() : millis() / 1000) - twilightLoopTime) >= 300) {
     twilightLoopTime = RTC.isrunning() ? now.unixtime() : millis() / 1000;
-    int newLight = analogRead(light_pin);
+    int newLight = analogRead(light_sensor_pin);
 
     if (abs(light - newLight) >= 20) {
       light = newLight;
       bool sent = false;
 
-      if (light > 0 && twilight != (light < dayBoundary)) {
+      if (light > 4 && twilight != (light < dayBoundary)) {
         twilight = light < dayBoundary;
 
-        if (RTC.isrunning() && (now.unixtime() - offset - sunset) > 3600 && (now.unixtime() - offset - sunrise) > 3600) {
+        if (RTC.isrunning() && ((RTC.now().unixtime() - offset) - start) > 60
+        && (now.unixtime() - offset - sunset) > 3600 && (now.unixtime() - offset - sunrise) > 3600) {
           if (twilight) {
             if (sunset <= sunrise) {
               sunset = now.unixtime() - offset;
@@ -391,9 +391,7 @@ void readData(String payload, bool perWiFi) {
   }
 
   if (jsonObject.containsKey("calibrate")) {
-    String calibrationData = jsonObject["calibrate"].as<String>();
-    calibration = strContains(calibrationData, "s") ? 2 : (strContains(calibrationData, "p") ? 1 : 0);
-    setCoverage(calibrationData.substring(1, calibrationData.length()).toInt(), true);
+    setCoverage(jsonObject["calibrate"].as<int>(), true);
     return;
   }
 
@@ -460,6 +458,14 @@ void readData(String payload, bool perWiFi) {
     int newSteps = jsonObject["steps"].as<int>();
     if (steps != newSteps) {
       steps = newSteps;
+      settingsChange = true;
+    }
+  }
+
+  if (jsonObject.containsKey("boundary")) {
+    int newBoundary = jsonObject["boundary"].as<int>();
+    if (dayBoundary != newBoundary) {
+      dayBoundary = newBoundary;
       settingsChange = true;
     }
   }
@@ -583,7 +589,7 @@ void setCoverage(int set, bool calibrate) {
     if (calibrate) {
       destination = set;
 
-      writeLog("Calibration. Blinds movement by " + String((int)destination) + " steps (wing " + calibration + ")");
+      writeLog("Calibration. Blinds movement by " + String((int)destination) + " steps");
     } else {
       destination = ((float)steps / 100.0) * (float)(set - coverage);
       coverage = set;
@@ -611,32 +617,83 @@ void setCoverage(int set, bool calibrate) {
   }
 }
 
-void cover(int lag) {
-  for (int i = 0; i < 8; i++) {
-    rotation(i);
-  }
-}
+void rotation() {
+  for (int x = 0; x < 1; x++) {
+    switch (step) {
+      case 0:
+        digitalWrite(stepper_pin[0], LOW);
+        digitalWrite(stepper_pin[1], LOW);
+        digitalWrite(stepper_pin[2], LOW);
+        digitalWrite(stepper_pin[3], HIGH);
+        break;
+      case 1:
+        digitalWrite(stepper_pin[0], LOW);
+        digitalWrite(stepper_pin[1], LOW);
+        digitalWrite(stepper_pin[2], HIGH);
+        digitalWrite(stepper_pin[3], HIGH);
+        break;
+      case 2:
+        digitalWrite(stepper_pin[0], LOW);
+        digitalWrite(stepper_pin[1], LOW);
+        digitalWrite(stepper_pin[2], HIGH);
+        digitalWrite(stepper_pin[3], LOW);
+        break;
+      case 3:
+        digitalWrite(stepper_pin[0], LOW);
+        digitalWrite(stepper_pin[1], HIGH);
+        digitalWrite(stepper_pin[2], HIGH);
+        digitalWrite(stepper_pin[3], LOW);
+        break;
+      case 4:
+        digitalWrite(stepper_pin[0], LOW);
+        digitalWrite(stepper_pin[1], HIGH);
+        digitalWrite(stepper_pin[2], LOW);
+        digitalWrite(stepper_pin[3], LOW);
+        break;
+      case 5:
+        digitalWrite(stepper_pin[0], HIGH);
+        digitalWrite(stepper_pin[1], HIGH);
+        digitalWrite(stepper_pin[2], LOW);
+        digitalWrite(stepper_pin[3], LOW);
+        break;
+      case 6:
+        digitalWrite(stepper_pin[0], HIGH);
+        digitalWrite(stepper_pin[1], LOW);
+        digitalWrite(stepper_pin[2], LOW);
+        digitalWrite(stepper_pin[3], LOW);
+        break;
+      case 7:
+        digitalWrite(stepper_pin[0], HIGH);
+        digitalWrite(stepper_pin[1], LOW);
+        digitalWrite(stepper_pin[2], LOW);
+        digitalWrite(stepper_pin[3], HIGH);
+        break;
+      default:
+        digitalWrite(stepper_pin[0], LOW);
+        digitalWrite(stepper_pin[1], LOW);
+        digitalWrite(stepper_pin[2], LOW);
+        digitalWrite(stepper_pin[3], LOW);
+        break;
+    }
 
-void uncover(int lag) {
-  for (int i = 7; i >= 0; i--) {
-    rotation(i);
-  }
-}
-
-void rotation(byte pin) {
-  if (pin < 8) {
-    for (int i = 0; i < 3; i++) {
-      if (pin & (1 << i)) {
-        digitalWrite(multiplexer_pin[i], HIGH);
+    if (destination > 0) {
+      if (reversed) {
+        step--;
       } else {
-        digitalWrite(multiplexer_pin[i], LOW);
+        step++;
+      }
+    } else {
+      if (reversed) {
+        step++;
+      } else {
+        step--;
       }
     }
-  }
-
-  if (calibration == 0 || (calibration == 1 ? pin < 4 : pin > 3)) {
-    digitalWrite(stepper_pin, HIGH);
-    delay(lag);
-    digitalWrite(stepper_pin, LOW);
+    if (step > 7) {
+      step = 0;
+    }
+    if (step < 0) {
+      step = 7;
+    }
   }
 }

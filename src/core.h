@@ -12,7 +12,7 @@ RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
-const int version = 5;
+const int version = 6;
 const bool offline = true;
 const String baseURL = "";
 
@@ -23,7 +23,6 @@ String password;
 
 uint32_t start = 0;
 int uprisings = 1;
-bool reconnect = false;
 uint32_t loopTime = 0;
 uint32_t updateTime = 0;
 
@@ -143,7 +142,6 @@ bool connectingToWifi() {
   if (result) {
     startRestServer();
     sayHelloToTheServer();
-    reconnect = true;
   }
   return result;
 }
@@ -171,7 +169,6 @@ bool initiatingWPS() {
     saveTheSettings();
     startRestServer();
     sayHelloToTheServer();
-    reconnect = true;
   } else {
     logs += " time out";
   }
