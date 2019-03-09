@@ -85,7 +85,7 @@ void readSettings() {
     steps = jsonObject["steps"].as<int>();
   }
   if (jsonObject.containsKey("boundary")) {
-    steps = jsonObject["boundary"].as<int>();
+    dayBoundary = jsonObject["boundary"].as<int>();
   }
   if (jsonObject.containsKey("reversed")) {
     reversed = jsonObject["reversed"].as<bool>();
@@ -676,7 +676,7 @@ void rotation() {
         break;
     }
 
-    if (destination > 0) {
+    if (destination >= 0) {
       if (reversed) {
         step--;
       } else {
