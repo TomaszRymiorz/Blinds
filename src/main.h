@@ -5,7 +5,9 @@ const String device = "blinds";
 const int stepper_pin[] = {D5, D6, D7, D8};
 const int light_sensor_pin = A0;
 
-int dayBoundary = 60;
+int boundary = 60;
+int steps = 0;
+bool reversed = false;
 
 struct Smart {
   String days;
@@ -17,32 +19,30 @@ struct Smart {
   uint32_t access;
 };
 
-int coverage = 0;
-float destination = 0;
+int destination = 0;
 int actual = 0;
 int step = 0;
 
-int steps = 0;
-bool reversed = false;
-
 bool measurement = false;
-int measure = 0;
+int calibration = 0;
 
+int light = -1;
 uint32_t twilightLoopTime = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
 
-int light = 0;
-
-void setupStepperPins(bool mode);
+void setStepperPins(bool setMode);
+String toPercentages(int value);
+int toSteps(int value);
 void readSettings();
+void saveSettings();
 void resume();
 void saveTheState();
-void saveTheSettings();
 void sayHelloToTheServer() ;
-void startRestServer();
+void startServices();
 void handshake();
 void requestForState();
+void requestForBasicData();
 void reverseDirection();
 void resetCoverage();
 void makeMeasurement();
