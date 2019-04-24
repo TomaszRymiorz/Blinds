@@ -11,7 +11,7 @@ W przypadku braku informacji o sieci, urządzenie aktywuje wyszukiwania routera 
 
 Roleta automatycznie łączy się z zaprogramowaną siecią Wi-Fi w przypadku utraty połączenia.
 
-Zawiera czujnik światła wykorzystywany przez funkcje automatycznych ustawień. Dane z czujnika wysyłane są również do bliźniaczego urządzenia w pomieszczeniu jakim jest włącznik światła. Parowanie urządzeń odbywa się poprzez aplikację dedykowaną.
+Zawiera czujnik światła wykorzystywany przez funkcje automatycznych ustawień. Dane z czujnika przesyłane są również do pozostałych urządzeń systemu iDom będących w tej samej sieci Wi-Fi.
 
 Roleta posiada opcję wykonania pomiaru wysokości okna, zmianę kierunku obrotów silnika oraz możliwość kalibracji rolety. Funkcja mierzenia okna wyklucza stosowanie niewygodnych ograniczników krańcowych, zapobiega pomyłkom błędnie podanych ręcznie wartości i ewentualnych różnic w silnikach w przypadku wartości zdefiniowanych programowo.
 
@@ -35,9 +35,11 @@ Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protoko
 
 * "/hello" - Handshake wykorzystywany przez dedykowaną aplikację, służy do potwierdzenia tożsamości oraz przesłaniu parametrów pracy rolety.
 
-* "/set" - Pod ten adres przesyłane są ustawienia dla rolety, dane przesyłane w formacie JSON. Ustawić można strefę czasową ("offset"), czas RTC ("time"), IP bliźniaczego urządzenia ("twin"), ustawienia automatyczne ("smart"), pozycję rolety na oknie ("val"), dokonać kalibracji pozycji, jak również zmienić ilość kroków czy wartość granicy dnia.
+* "/set" - Pod ten adres przesyłane są ustawienia dla rolety, dane przesyłane w formacie JSON. Ustawić można strefę czasową ("offset"), czas RTC ("time"), ustawienia automatyczne ("smart"), pozycję rolety na oknie ("val"), dokonać kalibracji pozycji, jak również zmienić ilość kroków czy wartość granicy dnia.
 
 * "/state" - Służy do regularnego odpytywania rolety o jej podstawowe stany, położenie rolety i wskazania czujnika oświetlenia, a także w przypadku wykonywania pomiaru okna ("measure") - ilość kroków silnika.
+
+* "/basicdata" - Służy innym urządzeniom systemu iDom do samokontroli. Jeśli któreś urządzenie po uruchomieniu nie pamięta aktualnej godziny lub nie posiada czujnika światła, ta funkcja zwraca aktualną godzinę i dane z czujnika.
 
 * "/reversed" - Odpytanie tego adresu zmienia kierunek obracania się silnika rolety.
 
@@ -47,4 +49,4 @@ Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protoko
 
 * "/deletewifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.
 
-* "/log" - Pod tym adresem znajduje się dziennik aktywności urządzenia.
+* "/log" - Pod tym adresem znajduje się dziennik aktywności urządzenia (domyślnie wyłączony).
