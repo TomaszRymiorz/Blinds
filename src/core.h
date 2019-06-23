@@ -13,8 +13,8 @@ RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
-const int version = 7;
-const bool offline = true;
+const int version = 8;
+bool offline = true;
 const String baseURL = "";
 const bool keepLog = false;
 
@@ -42,17 +42,19 @@ bool strContains(String text, String value);
 bool timeHasChanged();
 void note(String text);
 bool writeObjectToFile(String name, JsonObject& jsonObject);
-bool connectingToWifi();
-bool initiatingWPS();
+void connectingToWifi();
+void initiatingWPS();
 void receivedTheData();
 void requestForLogs();
 void clearLogs();
 void deleteWiFiSettings();
+void onlineswitch();
 String get1Smart(int index);
 void getOnlineData();
 void putDataOnline(String variant, String values);
 void putOfflineData(String values);
 void getBasicData();
+
 
 bool strContains(String text, String value) {
   return text.indexOf(value) != -1;
@@ -113,7 +115,7 @@ bool writeObjectToFile(String name, JsonObject& jsonObject) {
 }
 
 
-bool connectingToWifi() {
+void connectingToWifi() {
   String logs = "Connecting to Wi-Fi";
   Serial.print("\n" + logs);
 
@@ -137,48 +139,45 @@ bool connectingToWifi() {
   } else {
     logs += " timed out";
   }
-
   note(logs);
 
   if (result) {
+    WiFi.setAutoReconnect(true);
+
     startServices();
     sayHelloToTheServer();
+  } else {
+    initiatingWPS();
   }
-  return result;
 }
 
-bool initiatingWPS() {
+void initiatingWPS() {
   String logs = "Initiating WPS";
   Serial.print("\n" + logs);
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+
   WiFi.begin();
-  WiFi.beginWPSConfig();
-  int timeout = 0;
-  while (timeout++ < 20 && WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED) {
+    WiFi.beginWPSConfig();
     Serial.print(".");
     delay(500);
   }
 
-  bool result = WiFi.status() == WL_CONNECTED;
+  ssid = WiFi.SSID();
+  password = WiFi.psk();
 
-  if (result) {
-    ssid = WiFi.SSID();
-    password = WiFi.psk();
-    logs += " finished";
-    logs += "\n Connected to " + WiFi.SSID();
-    logs += "\n IP address: " + WiFi.localIP().toString();
-
-    saveSettings();
-    startServices();
-    sayHelloToTheServer();
-  } else {
-    logs += " time out";
-  }
-
+  logs += " finished";
+  logs += "\n Connected to " + WiFi.SSID();
+  logs += "\n IP address: " + WiFi.localIP().toString();
   note(logs);
-  return result;
+  saveSettings();
+
+  WiFi.setAutoReconnect(true);
+
+  startServices();
+  sayHelloToTheServer();
 }
 
 
@@ -226,6 +225,23 @@ void deleteWiFiSettings() {
   server.send(200, "text/plain", "Done");
 }
 
+void onlineswitch() {
+  if (SPIFFS.exists("/online.txt")) {
+    SPIFFS.remove("/online.txt");
+  } else {
+    File file = SPIFFS.open("/online.txt", "a");
+    if (file) {
+      file.println();
+      file.close();
+    }
+  }
+  offline = !SPIFFS.exists("/online.txt");
+
+  String logs = "The device has been set to " + String(offline ? "OFFLINE" : "ONLINE") + " mode";
+  server.send(200, "text/plain", logs);
+  note(logs);
+}
+
 
 String get1Smart(int index) {
   int found = 0;
@@ -250,7 +266,6 @@ void getOnlineData() {
   //
   // if (sendingError) {
   //   sayHelloToTheServer();
-  //   // return;
   // }
   //
   // blockOnlineData = true;
@@ -342,19 +357,21 @@ void getBasicData() {
 
     for (int i = 0; i < n; ++i) {
       ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
+      logs = "Get basic data from " + ip;
       HTTP.begin("http://" + ip + "/basicdata");
       HTTP.addHeader("Content-Type", "text/plain");
       int httpCode = HTTP.GET();
 
-      if (httpCode > 0) {
-        if (httpCode == HTTP_CODE_OK) {
-          String data = HTTP.getString();
-          note("Received basic data from " + ip + ": " + data);
-          readData(data, true);
-        }
+      if (httpCode > 0 && httpCode == HTTP_CODE_OK) {
+        String data = HTTP.getString();
+        logs = "Received basic data from " + ip + ": " + data;
+        readData(data, true);
+      } else {
+        logs += " failed!";
       }
 
       HTTP.end();
+      note(logs);
     }
   }
 }

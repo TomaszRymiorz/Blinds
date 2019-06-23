@@ -1,11 +1,18 @@
 #include <Arduino.h>
 
 const String device = "blinds";
+const bool bipolar = true;
+const int wings = bipolar ? 2 : 1;
 
-const int stepper_pin[] = {D5, D6, D7, D8};
 const int light_sensor_pin = A0;
 
-int boundary = 60;
+const int bipolar_enable_pin = D3;
+const int bipolar_direction_pin = D6;
+const int bipolar_pin[] = {D5, D7}; // stepper1, stepper2
+
+const int unipolar_pin[] = {D5, D6, D7, D8};
+
+int boundary = 300;
 int steps = 0;
 bool reversed = false;
 
@@ -25,16 +32,17 @@ int step = 0;
 
 bool measurement = false;
 int calibration = 0;
+int calibration_wings = 0;
 
 int light = -1;
-uint32_t twilightLoopTime = 0;
+uint32_t twilightCounter = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
 
 void setStepperPins(bool setMode);
 String toPercentages(int value);
 int toSteps(int value);
-void readSettings();
+bool readSettings(bool backup);
 void saveSettings();
 void resume();
 void saveTheState();
@@ -44,11 +52,16 @@ void handshake();
 void requestForState();
 void requestForBasicData();
 void reverseDirection();
-void resetCoverage();
+void setMin();
+void setMax();
 void makeMeasurement();
+void cancelMeasurement();
+void endMeasurement();
 bool lightHasChanged();
 void readData(String payload, bool perWiFi);
 void setSmart();
-void checkSmart(bool lightHasChanged);
+void checkSmart(bool lightChanged);
 void setCoverage(int set, bool calibrate);
 void rotation();
+void bipolarRotation();
+void unipolarRotation();
