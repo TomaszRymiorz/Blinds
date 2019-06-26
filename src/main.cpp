@@ -742,9 +742,9 @@ void rotation() {
 }
 
 void bipolarRotation() {
-  digitalWrite(bipolar_pin[0], (calibration == 0 || strContains(String(calibration_wings), "1")) ? HIGH : LOW);
+  digitalWrite(bipolar_pin[0], (calibration_wings == 0 || strContains(String(calibration_wings), "1")) ? HIGH : LOW);
   digitalWrite(bipolar_pin[0], LOW);
-  digitalWrite(bipolar_pin[1], (calibration == 0 || strContains(String(calibration_wings), "2")) ? HIGH : LOW);
+  digitalWrite(bipolar_pin[1], (calibration_wings == 0 || strContains(String(calibration_wings), "2")) ? HIGH : LOW);
   digitalWrite(bipolar_pin[1], LOW);
 }
 
