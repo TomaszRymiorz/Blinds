@@ -13,8 +13,8 @@ RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
-const int version = 8;
-bool offline = true;
+const int version = 9;
+bool offline = true; // set by "main.cpp / setup()"
 const String baseURL = "";
 const bool keepLog = false;
 
@@ -24,7 +24,7 @@ char hostName[16] = {0};
 String ssid = "";
 String password = "";
 
-uint32_t start = 0;
+uint32_t startTime = 0;
 uint32_t loopTime = 0;
 uint32_t updateTime = 0;
 int uprisings = 1;
@@ -36,10 +36,10 @@ int smartCount = 0;
 
 bool twilight = false;
 bool sendingError = false;
-bool blockOnlineData = false;
+bool blockGetOnlineData = false;
 
 bool strContains(String text, String value);
-bool timeHasChanged();
+bool hasTimeChanged();
 void note(String text);
 bool writeObjectToFile(String name, JsonObject& jsonObject);
 void connectingToWifi();
@@ -48,19 +48,19 @@ void receivedTheData();
 void requestForLogs();
 void clearLogs();
 void deleteWiFiSettings();
-void onlineswitch();
+void onlineSwitch();
 String get1Smart(int index);
 void getOnlineData();
-void putDataOnline(String variant, String values);
+void putOnlineData(String variant, String values);
 void putOfflineData(String values);
-void getBasicData();
+void getOfflineData();
 
 
 bool strContains(String text, String value) {
   return text.indexOf(value) != -1;
 }
 
-bool timeHasChanged() {
+bool hasTimeChanged() {
   uint32_t currentTime = RTC.isrunning() ? RTC.now().unixtime() : millis() / 1000;
   if (abs(currentTime - loopTime) >= 1) {
     loopTime = currentTime;
@@ -119,6 +119,7 @@ void connectingToWifi() {
   String logs = "Connecting to Wi-Fi";
   Serial.print("\n" + logs);
 
+
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
@@ -126,8 +127,9 @@ void connectingToWifi() {
   WiFi.begin(ssid.c_str(), password.c_str());
   int timeout = 0;
   while (timeout++ < 20 && WiFi.status() != WL_CONNECTED) {
+    delay(250);
     Serial.print(".");
-    delay(500);
+    delay(250);
   }
 
   bool result = WiFi.status() == WL_CONNECTED;
@@ -155,14 +157,16 @@ void initiatingWPS() {
   String logs = "Initiating WPS";
   Serial.print("\n" + logs);
 
+
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
 
   WiFi.begin();
   while (WiFi.status() != WL_CONNECTED) {
     WiFi.beginWPSConfig();
+    delay(250);
     Serial.print(".");
-    delay(500);
+    delay(250);
   }
 
   ssid = WiFi.SSID();
@@ -199,12 +203,13 @@ void requestForLogs() {
   }
   Serial.print("\nA log file was requested");
 
-  server.setContentLength(file.size() + String("Log file\n").length());
+  server.setContentLength(file.size() + String("Log file\nHTTP/1.1 200 OK").length());
   server.send (200, "text/html", "Log file\n");
   while (file.available()) {
     server.sendContent(String(char(file.read())));
   }
   file.close();
+  server.send (200, "text/html", "Done");
 }
 
 void clearLogs() {
@@ -220,12 +225,12 @@ void clearLogs() {
 void deleteWiFiSettings() {
   ssid = "";
   password = "";
-  note("Wi-Fi settings have been removed");
   saveSettings();
+  note("Wi-Fi settings have been removed");
   server.send(200, "text/plain", "Done");
 }
 
-void onlineswitch() {
+void onlineSwitch() {
   if (SPIFFS.exists("/online.txt")) {
     SPIFFS.remove("/online.txt");
   } else {
@@ -259,93 +264,7 @@ String get1Smart(int index) {
 }
 
 
-void getOnlineData() {
-  // if (WiFi.status() != WL_CONNECTED || offline || blockOnlineData) {
-  //   return;
-  // }
-  //
-  // if (sendingError) {
-  //   sayHelloToTheServer();
-  // }
-  //
-  // blockOnlineData = true;
-  //
-  // HTTP.begin(baseURL + "/detail/" + device + "/?id=" + WiFi.macAddress() + "&up=" + updateTime);
-  // int httpCode = HTTP.GET();
-  //
-  // if (httpCode > 0) {
-  //   if (httpCode == HTTP_CODE_OK) {
-  //     readData(HTTP.getString(), false);
-  //     blockOnlineData = false;
-  //   }
-  // } else {
-  //   Serial.print(".");
-  //   blockOnlineData = false;
-  // }
-  //
-  // HTTP.end();
-}
-
-void putDataOnline(String variant, String values) {
-  // if (offline) {
-  //   return;
-  // }
-  //
-  // if (WiFi.status() != WL_CONNECTED) {
-  //   sendingError = true;
-  //   return;
-  // }
-  //
-  // HTTP.begin(baseURL + "/" + variant + "/" + device + "/?id=" + WiFi.macAddress() + "&" + values);
-  // int httpCode = HTTP.PUT("");
-  //
-  // if (httpCode > 0) {
-  //   if (httpCode == HTTP_CODE_OK) {
-  //     note("Data sent to the server:\n {" + values + "}");
-  //     readData(HTTP.getString(), false);
-  //     sendingError = false;
-  //   }
-  // } else {
-  //   if (!sendingError) {
-  //     note("Failure to send data to the server:\n {" + values + "}");
-  //   }
-  //   sendingError = true;
-  // }
-  //
-  // HTTP.end();
-}
-
-void putOfflineData(String values) {
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-
-  int n = MDNS.queryService("idom", "tcp");
-  if (n > 0) {
-    String ip;
-    String logs;
-
-    for (int i = 0; i < n; ++i) {
-      ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
-
-      HTTP.begin("http://" + ip + "/set");
-      HTTP.addHeader("Content-Type", "text/plain");
-      int httpCode = HTTP.PUT(values);
-      if (httpCode > 0) {
-        logs += "\nhttp://" + ip + "/set" + values;
-      } else {
-        logs += "\nError sending data to " + ip;
-      }
-      HTTP.end();
-    }
-
-    if (logs != "") {
-      note("Data transfer between devices (" + String(n) + "): " + logs + "");
-    }
-  }
-}
-
-void getBasicData() {
+void getOfflineData() {
   if (WiFi.status() != WL_CONNECTED || !offline) {
     return;
   }
@@ -374,4 +293,92 @@ void getBasicData() {
       note(logs);
     }
   }
+}
+
+void putOfflineData(String values) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  int n = MDNS.queryService("idom", "tcp");
+  if (n == 0) {
+    return;
+  }
+
+  String ip;
+  String logs;
+
+  for (int i = 0; i < n; ++i) {
+    ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
+
+    HTTP.begin("http://" + ip + "/set");
+    HTTP.addHeader("Content-Type", "text/plain");
+    int httpCode = HTTP.PUT(values);
+    if (httpCode > 0) {
+      logs += "\nhttp://" + ip + "/set" + values;
+    } else {
+      logs += "\nError sending data to " + ip;
+    }
+    HTTP.end();
+  }
+
+  if (logs != "") {
+    note("Data transfer between devices (" + String(n) + "): " + logs + "");
+  }
+}
+
+void getOnlineData() {
+  // if (WiFi.status() != WL_CONNECTED || offline || blockGetOnlineData) {
+  //   return;
+  // }
+  //
+  // if (sendingError) {
+  //   sayHelloToTheServer();
+  // }
+  //
+  // blockGetOnlineData = true;
+  //
+  // HTTP.begin(baseURL + "/detail/" + device + "/?id=" + WiFi.macAddress() + "&up=" + updateTime);
+  // int httpCode = HTTP.GET();
+  //
+  // if (httpCode > 0) {
+  //   if (httpCode == HTTP_CODE_OK) {
+  //     readData(HTTP.getString(), false);
+  //   }
+  //   blockGetOnlineData = false;
+  // } else {
+  //   Serial.print(".");
+  //   blockGetOnlineData = false;
+  // }
+  //
+  // HTTP.end();
+}
+
+void putOnlineData(String variant, String values) {
+  // if (offline) {
+  //   return;
+  // }
+  //
+  // if (WiFi.status() != WL_CONNECTED) {
+  //   sendingError = true;
+  //   return;
+  // }
+  //
+  // HTTP.begin(baseURL + "/" + variant + "/" + device + "/?id=" + WiFi.macAddress() + "&" + values);
+  // int httpCode = HTTP.PUT("");
+  //
+  // if (httpCode > 0) {
+  //   if (httpCode == HTTP_CODE_OK) {
+  //     note("Data sent to the server:\n {" + values + "}");
+  //     readData(HTTP.getString(), false);
+  //     sendingError = false;
+  //   }
+  // } else {
+  //   if (!sendingError) {
+  //     note("Failure to send data to the server:\n {" + values + "}");
+  //   }
+  //   sendingError = true;
+  // }
+  //
+  // HTTP.end();
 }

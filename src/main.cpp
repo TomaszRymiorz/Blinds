@@ -1,30 +1,30 @@
 #include "core.h"
 
 void setup() {
-  Serial.begin(74880);
+  Serial.begin(115200);
   while (!Serial) {}
 
   SPIFFS.begin();
   Wire.begin();
 
   note("iDom Blinds " + String(bipolar ? "st" : "nx"));
-  Serial.print("\n Roller blind ID: " + WiFi.macAddress());
+  Serial.print("\nRoller blind ID: " + WiFi.macAddress());
   offline = !SPIFFS.exists("/online.txt");
-  Serial.printf("\n The roller blind is set to %s mode", offline ? "OFFLINE" : "ONLINE");
+  Serial.printf("\nThe roller blind is set to %s mode", offline ? "OFFLINE" : "ONLINE");
 
   sprintf(hostName, "blinds_%s", String(WiFi.macAddress()).c_str());
   WiFi.hostname(hostName);
 
-  if (!readSettings(false)) {
-    readSettings(true);
+  if (!readSettings(0)) {
+    readSettings(1);
   }
   resume();
 
   RTC.begin();
   if (RTC.isrunning()) {
-    start = RTC.now().unixtime() - offset;
+    startTime = RTC.now().unixtime() - offset;
   }
-  Serial.printf("\n RTC initialization %s", start != 0 ? "completed" : "failed!");
+  Serial.printf("\nRTC initialization %s", startTime != 0 ? "completed" : "failed!");
 
   int newLight = analogRead(light_sensor_pin);
   if (newLight > boundary) {
@@ -43,8 +43,9 @@ void setup() {
 void setStepperPins(bool setMode) {
   if (bipolar) {
     if (setMode) {
-      pinMode(bipolar_pin[0], OUTPUT);
-      pinMode(bipolar_pin[1], OUTPUT);
+      for (int i = 0; i < 3; i++) {
+        pinMode(bipolar_step_pin[i], OUTPUT);
+      }
       pinMode(bipolar_direction_pin, OUTPUT);
       pinMode(bipolar_enable_pin, OUTPUT);
     }
@@ -59,12 +60,12 @@ void setStepperPins(bool setMode) {
   }
 }
 
-String toPercentages(int value) {
-  return String(value > 0 ? value * 100 / steps : 0);
+String toPercentages(int value, int steps) {
+  return String(value > 0 && steps > 0 ? value * 100 / steps : 0);
 }
 
-int toSteps(int value) {
-  return value > 0 ? value * steps / 100 : 0;
+int toSteps(int value, int steps) {
+  return value > 0 && steps > 0 ? value * steps / 100 : 0;
 }
 
 
@@ -107,23 +108,39 @@ bool readSettings(bool backup) {
   if (jsonObject.containsKey("sunrise")) {
     sunrise = jsonObject["sunrise"].as<int>();
   }
-  if (jsonObject.containsKey("steps")) {
-    steps = jsonObject["steps"].as<int>();
-  }
   if (jsonObject.containsKey("boundary")) {
     boundary = jsonObject["boundary"].as<int>();
-  }
-  if (jsonObject.containsKey("destination")) {
-    destination = jsonObject["destination"].as<int>();
-    actual = destination;
   }
   if (jsonObject.containsKey("reversed")) {
     reversed = jsonObject["reversed"].as<bool>();
   }
 
+  if (jsonObject.containsKey("steps1")) {
+    steps1 = jsonObject["steps1"].as<int>();
+  }
+  if (jsonObject.containsKey("steps2")) {
+    steps2 = jsonObject["steps2"].as<int>();
+  }
+  if (jsonObject.containsKey("steps3")) {
+    steps3 = jsonObject["steps3"].as<int>();
+  }
+
+  if (jsonObject.containsKey("destination1")) {
+    destination1 = jsonObject["destination1"].as<int>();
+    actual1 = destination1;
+  }
+  if (jsonObject.containsKey("destination2")) {
+    destination2 = jsonObject["destination2"].as<int>();
+    actual2 = destination2;
+  }
+  if (jsonObject.containsKey("destination3")) {
+    destination3 = jsonObject["destination3"].as<int>();
+    actual3 = destination3;
+  }
+
   String logs;
   jsonObject.printTo(logs);
-  note("The " + String(backup ? "backup" : "settings") + " settings file has been read:\n " + logs);
+  note("The " + String(backup ? "backup" : "settings") + " file has been read:\n " + logs);
 
   saveSettings();
 
@@ -136,16 +153,21 @@ void saveSettings() {
 
   jsonObject["ssid"] = ssid;
   jsonObject["password"] = password;
+
   jsonObject["smart"] = smartString;
   jsonObject["uprisings"] = uprisings;
   jsonObject["offset"] = offset;
-
   jsonObject["sunset"] = sunset;
   jsonObject["sunrise"] = sunrise;
-  jsonObject["steps"] = steps;
   jsonObject["boundary"] = boundary;
-  jsonObject["destination"] = destination;
   jsonObject["reversed"] = reversed;
+
+  jsonObject["steps1"] = steps1;
+  jsonObject["steps2"] = steps2;
+  jsonObject["steps3"] = steps3;
+  jsonObject["destination1"] = destination1;
+  jsonObject["destination2"] = destination2;
+  jsonObject["destination3"] = destination3;
 
   if (writeObjectToFile("settings", jsonObject)) {
     String logs;
@@ -160,7 +182,6 @@ void saveSettings() {
 
 void resume() {
   File file = SPIFFS.open("/resume.txt", "r");
-
   if (!file) {
     return;
   }
@@ -173,49 +194,69 @@ void resume() {
 
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& jsonObject = jsonBuffer.parseObject(buffer);
+  delete buffer;
 
   if (jsonObject.success()) {
-    if (jsonObject.containsKey("actual")) {
-      actual = jsonObject["actual"].as<float>();
+    String logs = "";
 
-      if (actual != destination) {
-        note("The roller blind will be moved by " + String(destination - actual) + " steps to the state of " + toPercentages(destination) + "%");
-      } else {
-        if (SPIFFS.exists("/resume.txt")) {
-          SPIFFS.remove("/resume.txt");
-        }
+    if (jsonObject.containsKey("1")) {
+      actual1 = jsonObject["1"].as<int>();
+      if (actual1 != destination1) {
+        logs = "\n1 by " + String(destination1 - actual1) + " steps to the state of " + toPercentages(destination1, steps1) + "%";
+      }
+    }
+    if (jsonObject.containsKey("2")) {
+      actual2 = jsonObject["2"].as<int>();
+      if (actual2 != destination2) {
+        logs += "\n2 by " + String(destination2 - actual2) + " steps to the state of " + toPercentages(destination2, steps2) + "%";
+      }
+    }
+    if (jsonObject.containsKey("3")) {
+      actual3 = jsonObject["3"].as<int>();
+      if (actual3 != destination3) {
+        logs += "\n3 by " + String(destination3 - actual3) + " steps to the state of " + toPercentages(destination3, steps3) + "%";
+      }
+    }
+
+    if (actual1 != destination1 || actual2 != destination2 || actual3 != destination3) {
+      note("The roller blind will be moved: " + logs);
+    } else {
+      if (SPIFFS.exists("/resume.txt")) {
+        SPIFFS.remove("/resume.txt");
       }
     }
   }
-
-  delete buffer;
 }
 
 void saveTheState() {
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& jsonObject = jsonBuffer.createObject();
 
-  jsonObject["actual"] = actual;
+  jsonObject["1"] = actual1;
+  jsonObject["2"] = actual2;
+  jsonObject["3"] = actual3;
 
   writeObjectToFile("resume", jsonObject);
 }
 
 
 void sayHelloToTheServer() {
-  // if (!offline) {
-  //   String request = "ip=" + WiFi.localIP().toString()
-  //   + "&deets=" + steps + "," + RTC.isrunning() + "," + start + "," + reversed + "," + uprisings + "," + version + "," + boundary
-  //   + "&tw=" + String(twilight) + "," + light;
+  // if (offline) {
+  //   return;
+  // }
   //
-  //   if (sendingError) {
-  //     request += "&val=" + toPercentages(destination)
-  //     + "&set=" + (sunset > 0 ? sunset : 0)
-  //     + "&rise=" + (sunrise > 0 ? sunrise : 0);
+  // String request = "ip=" + WiFi.localIP().toString()
+  // + "&deets=" + steps1 + "." + steps2 + "." + steps3 + "," + RTC.isrunning() + "," + startTime + "," + reversed + "," + uprisings + "," + version + "," + boundary
+  // + "&tw=" + String(twilight) + "," + light;
   //
-  //     putDataOnline("detail", request);
-  //   } else {
-  //     putDataOnline("rooms", request);
-  //   }
+  // if (sendingError) {
+  //   request += "&val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3)
+  //   + "&set=" + (sunset > 0 ? sunset : 0)
+  //   + "&rise=" + (sunrise > 0 ? sunrise : 0);
+  //
+  //   putOnlineData("detail", request);
+  // } else {
+  //   putOnlineData("rooms", request);
   // }
 }
 
@@ -227,12 +268,12 @@ void startServices() {
   server.on("/log", HTTP_GET, requestForLogs);
   server.on("/log", HTTP_DELETE, clearLogs);
   server.on("/reversed", HTTP_POST, reverseDirection);
-  server.on("/measurement", HTTP_POST, makeMeasurement);
-  server.on("/cancelmeasurement", HTTP_POST, cancelMeasurement);
-  server.on("/endmeasurement", HTTP_POST, endMeasurement);
+  server.on("/measurement/start", HTTP_POST, makeMeasurement);
+  server.on("/measurement/cancel", HTTP_POST, cancelMeasurement);
+  server.on("/measurement/end", HTTP_POST, endMeasurement);
   server.on("/admin/reset", HTTP_POST, setMin);
   server.on("/admin/setmax", HTTP_POST, setMax);
-  server.on("/admin/onlineswitch", HTTP_POST, onlineswitch);
+  server.on("/admin/onlineswitch", HTTP_POST, onlineSwitch);
   server.on("/admin/delete/wifisettings", HTTP_DELETE, deleteWiFiSettings);
   server.begin();
 
@@ -241,7 +282,7 @@ void startServices() {
   MDNS.addService("idom", "tcp", 8080);
 
   if (light == -1 || !RTC.isrunning()) {
-    getBasicData();
+    getOfflineData();
   }
 }
 
@@ -250,71 +291,107 @@ void handshake() {
 
   String reply = "{\"id\":\"" + WiFi.macAddress()
   + "\",\"version\":" + version
-  + ",\"value\":" + toPercentages(destination)
+  + ",\"value1\":" + toPercentages(destination1, steps1)
+  + ",\"value2\":" + toPercentages(destination2, steps2)
+  + ",\"value3\":" + toPercentages(destination3, steps3)
   + ",\"twilight\":\"" + twilight + "," + light
   + "\",\"sunset\":" + (sunset > 0 ? sunset : 0)
   + ",\"sunrise\":" + (sunrise > 0 ? sunrise : 0)
   + ",\"smart\":\"" + smartString
-  + "\",\"steps\":" + steps
+  + "\",\"steps1\":" + steps1
+  + ",\"steps2\":" + steps2
+  + ",\"steps3\":" + steps3
   + ",\"boundary\":" + boundary
   + ",\"rtc\":" + RTC.isrunning()
-  + ",\"active\":" + (start != 0 ? RTC.now().unixtime() - offset - start : 0)
+  + ",\"active\":" + (startTime != 0 ? RTC.now().unixtime() - offset - startTime : 0)
   + ",\"uprisings\":" + uprisings
   + ",\"offline\":" + offline
-  + ",\"wings\":" + wings
   + ",\"reversed\":" + reversed + "}";
 
-  Serial.print("\nShake hands");
+  Serial.print("\nHandshake");
   server.send(200, "text/plain", reply);
 }
 
 void requestForState() {
-  String reply = "{\"state\":\"" + toPercentages(destination) + ","
-  + light
-  + (twilight ? "t" : "")
-  + (!measurement && destination != actual ? "^" + toPercentages(actual) : "")
-  + (measurement ?  "=" + String(actual) : "")
+  String reply = "{\"state1\":\"" + toPercentages(destination1, steps1)
+  + (!measurement && destination1 != actual1 ? "^" + toPercentages(actual1, steps1) : "")
+
+  + "\",\"state2\":\"" + toPercentages(destination2, steps2)
+  + (!measurement && destination2 != actual2 ? "^" + toPercentages(actual2, steps2) : "")
+
+  + "\",\"state3\":\"" + toPercentages(destination3, steps3)
+  + (!measurement && destination3 != actual3 ? "^" + toPercentages(actual3, steps3) : "")
+
+  + (light > -1 ? "\",\"light\":\"" + String(light) + String(twilight ? "t" : "") + (twilightCounter > 0 ? ("," + String(twilightCounter)) : "") : "")
+
   + "\"}";
 
   server.send(200, "text/plain", reply);
 }
 
 void requestForBasicData() {
-  String reply = "{\"time\":" + String(RTC.now().unixtime() - offset);
-  if (light > -1) {
-    reply += ",";
-    reply += "\"twilight\":" + String(twilight);
-  }
+  String reply = "{\"time\":" + String(RTC.now().unixtime() - offset)
+  + (light > -1 ? ",\"twilight\":" + String(twilight) : "")
+  + "}";
 
-  server.send(200, "text/plain", reply + "}");
+  server.send(200, "text/plain", reply);
 }
 
 void reverseDirection() {
   reversed = !reversed;
+  note("Engine set in the " + String(reversed ? "opposite" : "right") +  " direction");
   saveSettings();
   server.send(200, "text/plain", "Done");
   sayHelloToTheServer();
-  note("Engine set in the " + String(reversed ? "opposite" : "right") +  " direction");
 }
 
 void setMin() {
-  destination = 0;
-  actual = 0;
+  destination1 = 0;
+  destination2 = 0;
+  destination3 = 0;
+  actual1 = 0;
+  actual2 = 0;
+  actual3 = 0;
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putDataOnline("detail", "val=0");
+  putOnlineData("detail", "val=0.0.0");
 }
 
 void setMax() {
-  destination = steps;
-  actual = steps;
+  destination1 = steps1;
+  destination2 = steps2;
+  destination3 = steps3;
+  actual1 = steps1;
+  actual2 = steps2;
+  actual3 = steps3;
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putDataOnline("detail", "val=100");
+  putOnlineData("detail", "val=100.100.100");
 }
 
 void makeMeasurement() {
-  if (destination != 0 || actual != destination) {
+  if (measurement) {
+    return;
+  }
+
+  DynamicJsonBuffer jsonBuffer(JSON_OBJECT_SIZE(3));
+  JsonObject& jsonObject = jsonBuffer.parseObject(server.arg("plain"));
+
+  if (!jsonObject.success()) {
+    server.send(200, "text/plain", "Body not received");
+    return;
+  }
+
+  if (bipolar && jsonObject.containsKey("wings")) {
+    wings = jsonObject["wings"].as<int>();
+  } else {
+    wings = 123;
+  }
+
+  if ((strContains(String(wings), "1") && !(destination1 == 0 || actual1 == destination1))
+  || (strContains(String(wings), "2") && !(destination2 == 0 || actual2 == destination2))
+  || (strContains(String(wings), "3") && !(destination3 == 0 || actual3 == destination3))) {
+    server.send(200, "text/plain", "Cannot execute a command");
     return;
   }
 
@@ -331,7 +408,6 @@ void cancelMeasurement() {
   }
 
   measurement = false;
-  digitalWrite(bipolar_direction_pin, destination < actual ? reversed : !reversed);
   server.send(200, "text/plain", "Done");
 }
 
@@ -341,49 +417,60 @@ void endMeasurement() {
   }
 
   measurement = false;
-  server.send(200, "text/plain", "{\"steps\":" + String(actual) + "}");
+  server.send(200, "text/plain", "Done");
 
-  steps = actual;
-  destination = actual;
+  if (strContains(String(wings), "1")) {
+    steps1 = actual1;
+    destination1 = actual1;
+  }
+  if (strContains(String(wings), "2")) {
+    steps2 = actual2;
+    destination2 = actual2;
+  }
+  if (strContains(String(wings), "3")) {
+    steps3 = actual3;
+    destination3 = actual3;
+  }
   setStepperPins(false);
+  note("Measurement completed");
   saveSettings();
   sayHelloToTheServer();
-  note("\nMeasurement result: " + String(actual) + " steps");
 }
 
 void loop() {
-  if (!WiFi.isConnected() && measurement) {
-    measurement = false;
-    return;
+  if (WiFi.status() == WL_CONNECTED) {
+  } else {
+    if (measurement) {
+      measurement = false;
+    }
   }
 
   server.handleClient();
   MDNS.update();
 
   if (measurement) {
-    actual++;
     rotation();
     return;
   }
 
   if (calibration != 0) {
+    rotation();
     if (calibration < 0) {
       calibration++;
     } else {
       calibration--;
     }
-    rotation();
     if (calibration == 0) {
       setStepperPins(false);
     }
     return;
   }
 
-  if (timeHasChanged()) {
+  if (hasTimeChanged()) {
     if (loopTime % 2 == 0) {
       getOnlineData();
     }
-    if (destination != actual) {
+    if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
       saveTheState();
     } else {
       if (bipolar) {
@@ -397,18 +484,13 @@ void loop() {
         }
       }
     }
-    checkSmart(lightHasChanged());
+    checkSmart(hasTheLightChanged());
   }
 
-  if (destination != actual) {
-    if (destination > actual) {
-      actual++;
-    } else {
-      actual--;
-    }
+  if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
     rotation();
-    if (destination == actual) {
-      Serial.printf("\nRoller blind reached the target position of %s%s", toPercentages(destination).c_str(), "%");
+    if (destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
+      Serial.print("\nRoller blind reached the target position");
       setStepperPins(false);
       if (SPIFFS.exists("/resume.txt")) {
         SPIFFS.remove("/resume.txt");
@@ -418,7 +500,7 @@ void loop() {
 }
 
 
-bool lightHasChanged() {
+bool hasTheLightChanged() {
   if (light == -1 || loopTime % 60 != 0) {
     return false;
   }
@@ -441,14 +523,14 @@ bool lightHasChanged() {
         if (twilight) {
           if (sunset <= sunrise) {
             sunset = RTC.now().unixtime() - offset;
-            putDataOnline("detail", "set=" + String(sunset) + "&tw=" + String(twilight) + "," + light);
+            putOnlineData("detail", "set=" + String(sunset) + "&tw=" + String(twilight) + "," + light);
             saveSettings();
             sent = true;
           }
         } else {
           if (sunrise <= sunset) {
             sunrise = RTC.now().unixtime() - offset;
-            putDataOnline("detail", "rise=" + String(sunrise) + "&tw=" + String(twilight) + "," + light);
+            putOnlineData("detail", "rise=" + String(sunrise) + "&tw=" + String(twilight) + "," + light);
             saveSettings();
             sent = true;
           }
@@ -460,7 +542,7 @@ bool lightHasChanged() {
   }
 
   if (!sent) {
-    putDataOnline("detail", "tw=" + String(twilight) + "," + light);
+    putOnlineData("detail", "tw=" + String(twilight) + "," + light);
   }
 
   return result;
@@ -469,10 +551,6 @@ bool lightHasChanged() {
 void readData(String payload, bool perWiFi) {
   DynamicJsonBuffer jsonBuffer(JSON_OBJECT_SIZE(3));
   JsonObject& jsonObject = jsonBuffer.parseObject(payload);
-
-  uint32_t newTime = 0;
-  bool settingsChange = false;
-  String result = "";
 
   if (!jsonObject.success()) {
     if (payload.length() > 0) {
@@ -483,14 +561,19 @@ void readData(String payload, bool perWiFi) {
 
   if (jsonObject.containsKey("calibrate")) {
     if (bipolar && jsonObject.containsKey("wings")) {
-      calibration_wings = jsonObject["wings"].as<int>();
+      wings = jsonObject["wings"].as<int>();
     } else {
-      calibration_wings = 0;
+      wings = 123;
     }
-    setCoverage(jsonObject["calibrate"].as<int>(), true);
+
+    prepareCalibration(jsonObject["calibrate"].as<int>());
     return;
   }
 
+  bool settingsChange = false;
+  String result = "";
+
+  uint32_t newTime = 0;
   if (jsonObject.containsKey("offset")) {
     int newOffset = jsonObject["offset"].as<int>();
     if (offset != newOffset) {
@@ -521,7 +604,7 @@ void readData(String payload, bool perWiFi) {
         }
       } else {
         RTC.adjust(DateTime(newTime));
-        start = RTC.now().unixtime() - offset;
+        startTime = RTC.now().unixtime() - offset;
         note("Adjust time");
       }
     }
@@ -545,18 +628,42 @@ void readData(String payload, bool perWiFi) {
   }
 
   if (jsonObject.containsKey("val")) {
-    int newDestination = toSteps(jsonObject["val"].as<int>());
-    if (destination != newDestination) {
-      setCoverage(newDestination, false);
-      result += result.length() > 0 ? "&" : "";
-      result += "val=" + toPercentages(newDestination);
+    String newValue = jsonObject["val"].as<String>();
+    destination1 = steps1 > 0 ? toSteps(newValue.substring(0, newValue.indexOf(".")).toInt(), steps1) : destination1;
+
+    if (bipolar) {
+      newValue = newValue.substring(newValue.indexOf(".") + 1, newValue.length());
+      destination2 = steps2 > 0 ? toSteps(newValue.substring(0, newValue.indexOf(".")).toInt(), steps2) : destination2;
+      destination3 = steps3 > 0 ? toSteps(newValue.substring(newValue.indexOf(".") + 1, newValue.length()).toInt(), steps3) : destination3;
+    }
+
+    if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
+      prepareRotation();
+      result += String(result.length() > 0 ? "&" : "") + "val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3);
     }
   }
 
-  if (jsonObject.containsKey("steps")) {
-    int newSteps = jsonObject["steps"].as<int>();
-    if (steps != newSteps) {
-      steps = newSteps;
+  int newSteps;
+  if (jsonObject.containsKey("steps1")) {
+    newSteps = jsonObject["steps1"].as<int>();
+    if (steps1 != newSteps && actual1 == 0) {
+      steps1 = newSteps;
+      settingsChange = true;
+    }
+  }
+
+  if (jsonObject.containsKey("steps2")) {
+    newSteps = jsonObject["steps2"].as<int>();
+    if (steps2 != newSteps && actual2 == 0) {
+      steps2 = newSteps;
+      settingsChange = true;
+    }
+  }
+
+  if (jsonObject.containsKey("steps3")) {
+    int newSteps = jsonObject["steps3"].as<int>();
+    if (steps3 != newSteps && actual3 == 0) {
+      steps3 = newSteps;
       settingsChange = true;
     }
   }
@@ -573,7 +680,6 @@ void readData(String payload, bool perWiFi) {
     bool newTwilight = jsonObject["twilight"].as<bool>();
     if (twilight != newTwilight) {
       twilight = newTwilight;
-      note("Received basic data: " + payload);
       checkSmart(true);
     }
   }
@@ -583,7 +689,7 @@ void readData(String payload, bool perWiFi) {
     saveSettings();
   }
   if (perWiFi && result.length() > 0) {
-    putDataOnline("detail", result);
+    putOnlineData("detail", result);
   }
 }
 
@@ -594,6 +700,7 @@ void setSmart() {
   }
 
   String smart;
+  String wing;
   String days;
   bool loweringAtNight;
   bool liftingAtDay;
@@ -616,8 +723,20 @@ void setSmart() {
   for (int i = 0; i < smartCount; i++) {
     smart = get1Smart(i);
     if (smart.length() > 0 && strContains(smart, "b")) {
+      enabled = !strContains(smart, "/");
+      smart = !enabled ? smart.substring(0, smart.indexOf("/")) : smart;
+
       loweringTime = strContains(smart, "_") ? smart.substring(0, smart.indexOf("_")).toInt() : -1;
       liftingTime = strContains(smart, "-") ? smart.substring(smart.indexOf("-") + 1, smart.length()).toInt() : -1;
+
+      smart = strContains(smart, "_") ? smart.substring(smart.indexOf("_") + 1, smart.length()) : smart;
+      smart = strContains(smart, "-") ? smart.substring(0, smart.indexOf("-")) : smart;
+
+      wing = strContains(smart, "4") ? "123" : "";
+      wing += strContains(smart, "1") ? "1" : "";
+      wing += strContains(smart, "2") ? "2" : "";
+      wing += strContains(smart, "3") ? "3" : "";
+      wing += wing == "" ? "123" : "";
 
       days = strContains(smart, "w") ? "ouehras" : "";
       days += strContains(smart, "o") ? "o" : "";
@@ -631,9 +750,7 @@ void setSmart() {
       loweringAtNight = strContains(smart, "n");
       liftingAtDay = strContains(smart, "d");
 
-      enabled = !strContains(smart, "/");
-
-      smartArray[i] = (Smart) {days, loweringAtNight, liftingAtDay, loweringTime, liftingTime, enabled, 0};
+      smartArray[i] = (Smart) {wing, days, loweringAtNight, liftingAtDay, loweringTime, liftingTime, enabled, 0};
     }
   }
 }
@@ -644,22 +761,37 @@ void checkSmart(bool lightChanged) {
   }
 
   bool result = false;
-  int newDestination = 0;
   DateTime now = RTC.now();
   int currentTime = (now.hour() * 60) + now.minute();
   String log = "The smart function has";
 
   int i = -1;
-  while (++i < smartCount && !result) {
+  while (++i < smartCount) {
     if (smartArray[i].enabled) {
       if (lightChanged) {
-        if (twilight && smartArray[i].loweringAtNight && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) && destination != steps) {
-          newDestination = steps;
+        if (twilight && smartArray[i].loweringAtNight && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
+          if (strContains(smartArray[i].wing, "1")) {
+            destination1 = steps1;
+          }
+          if (strContains(smartArray[i].wing, "2")) {
+            destination2 = steps2;
+          }
+          if (strContains(smartArray[i].wing, "3")) {
+            destination3 = steps3;
+          }
           result = true;
           log += " activated lowering the roller blind for the night";
         }
-        if (!twilight && smartArray[i].liftingAtDay && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() != 0 ? now.dayOfTheWeek() - 1 : now.dayOfTheWeek() + 6]) && destination != 0) {
-          newDestination = 0;
+        if (!twilight && smartArray[i].liftingAtDay && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() != 0 ? now.dayOfTheWeek() - 1 : now.dayOfTheWeek() + 6])) {
+          if (strContains(smartArray[i].wing, "1")) {
+            destination1 = 0;
+          }
+          if (strContains(smartArray[i].wing, "2")) {
+            destination2 = 0;
+          }
+          if (strContains(smartArray[i].wing, "3")) {
+            destination3 = 0;
+          }
           result = true;
           log += " activated lifting the roller blind for the day";
         }
@@ -667,29 +799,41 @@ void checkSmart(bool lightChanged) {
         if (smartArray[i].access + 60 < now.unixtime()) {
           if (smartArray[i].loweringTime == currentTime && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
             smartArray[i].access = now.unixtime();
-            if (destination != steps) {
-              newDestination = steps;
-              result = true;
-              log += " activated lowering the roller blind on time";
+            if (strContains(smartArray[i].wing, "1")) {
+              destination1 = steps1;
             }
+            if (strContains(smartArray[i].wing, "2")) {
+              destination2 = steps2;
+            }
+            if (strContains(smartArray[i].wing, "3")) {
+              destination3 = steps3;
+            }
+            result = true;
+            log += " activated lowering the roller blind on time";
           }
           if (smartArray[i].liftingTime == currentTime && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() != 0 ? now.dayOfTheWeek() - 1 : now.dayOfTheWeek() + 6]))) {
             smartArray[i].access = now.unixtime();
-            if (destination != 0) {
-              newDestination = 0;
-              result = true;
-              log += " activated lifting the roller blind on time";
+            if (strContains(smartArray[i].wing, "1")) {
+              destination1 = 0;
             }
+            if (strContains(smartArray[i].wing, "2")) {
+              destination2 = 0;
+            }
+            if (strContains(smartArray[i].wing, "3")) {
+              destination3 = 0;
+            }
+            result = true;
+            log += " activated lifting the roller blind on time";
           }
         }
       }
     }
   }
 
-  if (result) {
+  if (result && (destination1 != actual1 || destination2 != actual2 || destination3 != actual3)) {
     note(log);
-    putDataOnline("detail", "val=" + toPercentages(newDestination));
-    setCoverage(newDestination, false);
+    putOnlineData("detail", "val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3));
+    prepareRotation();
   } else {
     if (lightChanged) {
       note(log + "n't activated anything.");
@@ -698,38 +842,80 @@ void checkSmart(bool lightChanged) {
 }
 
 
-void setCoverage(int set, bool calibrate) {
-  if (calibrate) {
-    if (destination != actual) {
-      return;
-    }
+void prepareCalibration(int set) {
+  if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
+    return;
+  }
 
-    if (actual != 0 && actual == steps) {
-      steps += bipolar ? set / 2 : set;
-      destination += bipolar ? set / 2 : set;
-      saveSettings();
-      note("Calibration. Roller blind movement by " + String(set) + " steps. Steps set at " + String(steps) + ".");
-    }
-    if (actual == 0) {
+  if (bipolar) {
+    digitalWrite(bipolar_enable_pin, LOW);
+    digitalWrite(bipolar_direction_pin, set < 0 ? reversed : !reversed);
+  }
+
+  bool settingsChange = false;
+  String logs = "";
+
+  if (strContains(String(wings), "1")) {
+    if (actual1 == 0) {
       calibration = bipolar ? set / 2 : set;
-      note("Calibration" + String(calibration_wings == 2 ? " second wings" : calibration_wings == 1 ? " primary wings" : "") + ". Roller blind movement by " + String(set) + " steps.");
+    } else
+    if (actual1 == steps1) {
+      steps1 += bipolar ? set / 2 : set;
+      destination1 += bipolar ? set / 2 : set;
+      settingsChange = true;
+      logs += "\n1 movement by " + String(set) + " steps. Steps set at " + String(steps1) + ".";
     }
-    if (bipolar) {
-      digitalWrite(bipolar_enable_pin, LOW);
-      digitalWrite(bipolar_direction_pin, set < 0 ? reversed : !reversed);
+  }
+  if (strContains(String(wings), "2")) {
+    if (actual2 == 0) {
+      calibration = bipolar ? set / 2 : set;
+    } else
+    if (actual2 == steps2) {
+      steps2 += bipolar ? set / 2 : set;
+      destination2 += bipolar ? set / 2 : set;
+      settingsChange = true;
+      logs += "\n2 movement by " + String(set) + " steps. Steps set at " + String(steps2) + ".";
     }
-  } else {
-    destination = set;
-    if (bipolar) {
-      digitalWrite(bipolar_enable_pin, LOW);
-      digitalWrite(bipolar_direction_pin, destination < actual ? reversed : !reversed);
+  }
+  if (strContains(String(wings), "3")) {
+    if (actual3 == 0) {
+      calibration = bipolar ? set / 2 : set;
+    } else
+    if (actual3 == steps3) {
+      steps3 += bipolar ? set / 2 : set;
+      destination3 += bipolar ? set / 2 : set;
+      settingsChange = true;
+      logs += "\n3 movement by " + String(set) + " steps. Steps set at " + String(steps3) + ".";
     }
-    note("Roller blinds movement by " + String(destination - actual) + " steps. Change of state to " + toPercentages(destination) + "%.");
+  }
+
+  if (settingsChange) {
+    note("Height calibration: " + logs);
     saveSettings();
-    saveTheState();
+  } else {
+    note("Calibration of position 0. Wings " + String(wings) + " movement by " + String(set) + " steps.");
   }
 }
 
+void prepareRotation() {
+  if (bipolar) {
+    digitalWrite(bipolar_enable_pin, LOW);
+  }
+  String logs = "";
+  if (actual1 != destination1) {
+    logs = "\n1 by " + String(destination1 - actual1) + " steps. Change of state to " + toPercentages(destination1, steps1) + "%";
+  }
+  if (actual2 != destination2) {
+    logs += "\n2 by " + String(destination2 - actual2) + " steps. Change of state to " + toPercentages(destination2, steps2) + "%";
+  }
+  if (actual3 != destination3) {
+    logs += "\n3 by " + String(destination3 - actual3) + " steps. Change of state to " + toPercentages(destination3, steps3) + "%";
+  }
+  note("Roller blinds movement: " + logs);
+
+  saveSettings();
+  saveTheState();
+}
 
 void rotation() {
   if (bipolar) {
@@ -742,13 +928,79 @@ void rotation() {
 }
 
 void bipolarRotation() {
-  digitalWrite(bipolar_pin[0], (calibration_wings == 0 || strContains(String(calibration_wings), "1")) ? HIGH : LOW);
-  digitalWrite(bipolar_pin[0], LOW);
-  digitalWrite(bipolar_pin[1], (calibration_wings == 0 || strContains(String(calibration_wings), "2")) ? HIGH : LOW);
-  digitalWrite(bipolar_pin[1], LOW);
+  if (measurement) {
+    if (strContains(String(wings), "1")) {
+      digitalWrite(bipolar_step_pin[0], HIGH);
+      actual1++;
+    }
+  } else {
+    if (destination1 != actual1) {
+      digitalWrite(bipolar_direction_pin, destination1 < actual1 ? reversed : !reversed);
+      digitalWrite(bipolar_step_pin[0], HIGH);
+      if (destination1 > actual1) {
+        actual1++;
+      } else {
+        actual1--;
+      }
+    }
+    digitalWrite(bipolar_step_pin[0], calibration !=0 && strContains(String(wings), "1") ? HIGH : LOW);
+  }
+  digitalWrite(bipolar_step_pin[0], LOW);
+
+  if (measurement) {
+    if (strContains(String(wings), "2")) {
+      digitalWrite(bipolar_step_pin[1], HIGH);
+      actual2++;
+    }
+  } else {
+    if (destination2 != actual2
+      && (((destination1 == actual1 || destination1 > actual1) && destination2 > actual2)
+      || ((destination1 == actual1 || destination1 < actual1) && destination2 < actual2))) {
+      digitalWrite(bipolar_direction_pin, destination2 < actual2 ? reversed : !reversed);
+      digitalWrite(bipolar_step_pin[1], HIGH);
+      if (destination2 > actual2) {
+        actual2++;
+      } else {
+        actual2--;
+      }
+    }
+    digitalWrite(bipolar_step_pin[1], calibration !=0 && strContains(String(wings), "2") ? HIGH : LOW);
+  }
+  digitalWrite(bipolar_step_pin[1], LOW);
+
+  if (measurement) {
+    if (strContains(String(wings), "3")) {
+      digitalWrite(bipolar_step_pin[2], HIGH);
+      actual3++;
+    }
+  } else {
+    if (destination3 != actual3
+      && (((destination1 == actual1 || destination1 > actual1) && (destination2 == actual2 || destination2 > actual2) && destination3 > actual3)
+      || ((destination1 == actual1 || destination1 < actual1) && (destination2 == actual2 || destination2 < actual2) && destination3 < actual3))) {
+      digitalWrite(bipolar_direction_pin, destination3 < actual3 ? reversed : !reversed);
+      digitalWrite(bipolar_step_pin[2], HIGH);
+      if (destination3 > actual3) {
+        actual3++;
+      } else {
+        actual3--;
+      }
+    }
+    digitalWrite(bipolar_step_pin[2], calibration !=0 && strContains(String(wings), "3") ? HIGH : LOW);
+  }
+  digitalWrite(bipolar_step_pin[2], LOW);
 }
 
 void unipolarRotation() {
+  if (measurement) {
+    actual1++;
+  } else {
+    if (destination1 > actual1) {
+      actual1++;
+    } else {
+      actual1--;
+    }
+  }
+
   for (int x = 0; x < 1; x++) {
     switch (step) {
       case 0:
@@ -829,7 +1081,7 @@ void unipolarRotation() {
           }
         }
       } else {
-        if (destination < actual) {
+        if (destination1 < actual1) {
           if (reversed) {
             step--;
           } else {

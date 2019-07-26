@@ -13,11 +13,13 @@ Roleta automatycznie łączy się z zaprogramowaną siecią Wi-Fi w przypadku ut
 
 Zawiera czujnik światła wykorzystywany przez funkcje automatycznych ustawień. Dane z czujnika przesyłane są również do pozostałych urządzeń systemu iDom będących w tej samej sieci Wi-Fi.
 
-Roleta posiada opcję wykonania pomiaru wysokości okna, zmianę kierunku obrotów silnika oraz możliwość kalibracji rolety. Funkcja mierzenia okna wyklucza stosowanie niewygodnych ograniczników krańcowych, zapobiega pomyłkom błędnie podanych ręcznie wartości i ewentualnych różnic w silnikach w przypadku wartości zdefiniowanych programowo.
+Roleta posiada opcję wykonania pomiaru wysokości okna, zmianę kierunku obrotów silnika oraz możliwość kalibracji rolety. Funkcja pomiaru okna wyklucza stosowanie niewygodnych ograniczników krańcowych, zapobiega pomyłkom błędnie podanych ręcznie wartości i ewentualnych różnic w silnikach w przypadku wartości zdefiniowanych programowo.
 
 Zegar czasu rzeczywistego wykorzystywany jest przez funkcję ustawień automatycznych.
 Ustawienia automatyczne obejmują opuszczanie i podnoszenie rolety o wybranej godzinie oraz opuszczanie po zapadnięciu zmroku i podnoszenie o świcie. Powtarzalność obejmuje okres jednego tygodnia, a ustawienia nie są ograniczone ilościowo. W celu zminimalizowania objętości wykorzystany został zapis tożsamy ze zmienną boolean, czyli dopiero wystąpienie znaku wskazuje na włączoną funkcję.
 
+* '4' wszystkie rolety, którymi steruje urządzenie - występuje tylko w zapisie aplikacji w celu zminimalizowania ilości przesyłanych danych
+* '1', '2', '3' numer rolety, którą steruje urządzenie
 * 'w' cały tydzień - występuje tylko w zapisie aplikacji w celu zminimalizowania ilości przesyłanych danych
 * 'o' poniedziałek, 'u' wtorek, 'e' środa, 'h' czwartek, 'r' piątek, 'a' sobota, 's' niedziela
 * 'n' opuść po zmroku
@@ -26,7 +28,7 @@ Ustawienia automatyczne obejmują opuszczanie i podnoszenie rolety o wybranej go
 * '-' podnieś o godzinie - jeśli występuje w zapisie, po nim znajduje się godzina w zapisie czasu uniksowego
 * '/' wyłącz ustawienie - obecność znaku wskazuje, że ustawienie będzie ignorowane
 
-Przykład zapisu trzech różnych ustawień automatycznych: 1140_bw-420,basn,/bouehrn-300
+Przykład zapisu trzech różnych ustawień automatycznych: 1140_b3w-420,b4asn,/b12ouehrn-300
 
 Ustawienia automatyczne obejmują również włącznik światła, a obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
 
@@ -43,10 +45,10 @@ Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protoko
 
 * "/reversed" - Odpytanie tego adresu zmienia kierunek obracania się silnika rolety.
 
-* "/reset" - Ustawia wartość pozycji rolety na 0.
+* "/reset" - Ustawia wartość pozycji rolet na 0.
 
 * "/measurement" - Służy do wykonania pomiaru wysokości okna.
 
-* "/deletewifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.
+* "/delete/wifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.
 
 * "/log" - Pod tym adresem znajduje się dziennik aktywności urządzenia (domyślnie wyłączony).
