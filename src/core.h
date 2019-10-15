@@ -13,47 +13,43 @@ RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
-const int version = 9;
-bool offline = true; // set by "main.cpp / setup()"
-const String baseURL = "";
-const bool keepLog = false;
+const int version = 10;
+bool offline = true;
+bool keepLog = false;
 
 const char daysOfTheWeek[7][12] = {"s", "o", "u", "e", "h", "r", "a"};
-char hostName[16] = {0};
+char hostName[30] = {0};
 
 String ssid = "";
 String password = "";
 
 uint32_t startTime = 0;
 uint32_t loopTime = 0;
-uint32_t updateTime = 0;
 int uprisings = 1;
 int offset = 0;
+bool twilight = false;
 
 String smartString = "0";
 Smart *smartArray;
 int smartCount = 0;
 
-bool twilight = false;
-bool sendingError = false;
-bool blockGetOnlineData = false;
-
 bool strContains(String text, String value);
 bool hasTimeChanged();
 void note(String text);
-bool writeObjectToFile(String name, JsonObject& jsonObject);
+bool writeObjectToFile(String name, DynamicJsonDocument object);
+String get1Smart(int index);
 void connectingToWifi();
 void initiatingWPS();
-void receivedTheData();
+void activationTheLog();
+void deactivationTheLog();
 void requestForLogs();
-void clearLogs();
+void clearTheLog();
 void deleteWiFiSettings();
-void onlineSwitch();
-String get1Smart(int index);
-void getOnlineData();
-void putOnlineData(String variant, String values);
-void putOfflineData(String values);
-void getOfflineData();
+void deleteDeviceMemory();
+void receivedOfflineData();
+void putOfflineData(String url, String values);
+void putMultiOfflineData(String values);
+void getOfflineData(bool log);
 
 
 bool strContains(String text, String value) {
@@ -69,9 +65,8 @@ bool hasTimeChanged() {
   return false;
 }
 
-
 void note(String text) {
-  if (text == "" || !keepLog) {
+  if (text == "") {
     return;
   }
 
@@ -94,24 +89,42 @@ void note(String text) {
   }
   logs += "] " + text;
 
-  File file = SPIFFS.open("/log.txt", "a");
-  if (file) {
-    file.println(logs);
-    file.close();
+  if (keepLog) {
+    File file = SPIFFS.open("/log.txt", "a");
+    if (file) {
+      file.println(logs);
+      file.close();
+    }
   }
+
   Serial.print("\n" + logs);
 }
 
-bool writeObjectToFile(String name, JsonObject& jsonObject) {
+bool writeObjectToFile(String name, DynamicJsonDocument object) {
   name = "/" + name + ".txt";
 
   File file = SPIFFS.open(name, "w");
   if (file) {
-    jsonObject.printTo(file);
+    serializeJson(object, file);
     file.close();
     return true;
   }
   return false;
+}
+
+String get1Smart(int index) {
+  int found = 0;
+  int strIndex[] = {0, -1};
+  int maxIndex = smartString.length() - 1;
+
+  for (int i = 0; i <= maxIndex && found <= index; i++) {
+    if (smartString.charAt(i) == ',' || i == maxIndex) {
+      found++;
+      strIndex[0] = strIndex[1] + 1;
+      strIndex[1] = (i == maxIndex) ? i + 1 : i;
+    }
+  }
+  return found > index ? smartString.substring(strIndex[0], strIndex[1]) : "";
 }
 
 
@@ -135,8 +148,7 @@ void connectingToWifi() {
   bool result = WiFi.status() == WL_CONNECTED;
 
   if (result) {
-    logs += " finished";
-    logs += "\n Connected to " + WiFi.SSID();
+    logs = "Connected to " + WiFi.SSID();
     logs += "\n IP address: " + WiFi.localIP().toString();
   } else {
     logs += " timed out";
@@ -160,39 +172,65 @@ void initiatingWPS() {
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-
   WiFi.begin();
-  while (WiFi.status() != WL_CONNECTED) {
-    WiFi.beginWPSConfig();
-    delay(250);
-    Serial.print(".");
-    delay(250);
+
+  WiFi.beginWPSConfig();
+
+  bool result = WiFi.status() == WL_CONNECTED;
+
+  if (result) {
+    ssid = WiFi.SSID();
+    password = WiFi.psk();
+
+    logs += " finished";
+    logs += "\n Connected to " + WiFi.SSID();
+  } else {
+    logs += " timed out";
   }
-
-  ssid = WiFi.SSID();
-  password = WiFi.psk();
-
-  logs += " finished";
-  logs += "\n Connected to " + WiFi.SSID();
-  logs += "\n IP address: " + WiFi.localIP().toString();
   note(logs);
-  saveSettings();
 
-  WiFi.setAutoReconnect(true);
-
-  startServices();
-  sayHelloToTheServer();
+  if (result) {
+    saveSettings();
+    startServices();
+    sayHelloToTheServer();
+  } else {
+    if (ssid != "" && password != "") {
+      connectingToWifi();
+    }
+  }
 }
 
 
-void receivedTheData() {
-  if (server.hasArg("plain")) {
-    server.send(200, "text/plain", "Data has received");
-    readData(server.arg("plain"), true);
+void activationTheLog() {
+  if (keepLog) {
     return;
   }
 
-  server.send(200, "text/plain", "Body not received");
+  File file = SPIFFS.open("/log.txt", "a");
+  if (file) {
+    file.println();
+    file.close();
+  }
+  keepLog = true;
+
+  String logs = "The log has been activated";
+  server.send(200, "text/plain", logs);
+  Serial.print("\n" + logs);
+}
+
+void deactivationTheLog() {
+  if (!keepLog) {
+    return;
+  }
+
+  if (SPIFFS.exists("/log.txt")) {
+    SPIFFS.remove("/log.txt");
+  }
+  keepLog = false;
+
+  String logs = "The log has been deactivated";
+  server.send(200, "text/plain", logs);
+  Serial.print("\n" + logs);
 }
 
 void requestForLogs() {
@@ -204,19 +242,25 @@ void requestForLogs() {
   Serial.print("\nA log file was requested");
 
   server.setContentLength(file.size() + String("Log file\nHTTP/1.1 200 OK").length());
-  server.send (200, "text/html", "Log file\n");
+  server.send(200, "text/html", "Log file\n");
   while (file.available()) {
     server.sendContent(String(char(file.read())));
   }
   file.close();
-  server.send (200, "text/html", "Done");
+  server.send(200, "text/html", "Done");
 }
 
-void clearLogs() {
+void clearTheLog() {
   if (SPIFFS.exists("/log.txt")) {
-    SPIFFS.remove("/log.txt");
-    server.send(200, "text/plain", "Done");
-    Serial.print("\nThe log file was cleared");
+    File file = SPIFFS.open("/log.txt", "w");
+    if (file) {
+      file.println();
+      file.close();
+    }
+
+    String logs = "The log file was cleared";
+    server.send(200, "text/plain", logs);
+    Serial.print("\n" + logs);
   } else {
     server.send(404, "text/plain", "Failed!");
   }
@@ -226,46 +270,47 @@ void deleteWiFiSettings() {
   ssid = "";
   password = "";
   saveSettings();
-  note("Wi-Fi settings have been removed");
-  server.send(200, "text/plain", "Done");
+
+  String logs = "Wi-Fi settings have been removed";
+  server.send(200, "text/plain", logs);
+  Serial.print("\n" + logs);
 }
 
-void onlineSwitch() {
-  if (SPIFFS.exists("/online.txt")) {
-    SPIFFS.remove("/online.txt");
-  } else {
-    File file = SPIFFS.open("/online.txt", "a");
-    if (file) {
-      file.println();
-      file.close();
-    }
-  }
-  offline = !SPIFFS.exists("/online.txt");
 
-  String logs = "The device has been set to " + String(offline ? "OFFLINE" : "ONLINE") + " mode";
-  server.send(200, "text/plain", logs);
+
+
+void receivedOfflineData() {
+  if (server.hasArg("plain")) {
+    server.send(200, "text/plain", "Data has received");
+    readData(server.arg("plain"), true);
+    return;
+  }
+
+  server.send(200, "text/plain", "Body not received");
+}
+
+void putOfflineData(String url, String values) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  String logs;
+
+  HTTP.begin("http://" + url + "/set");
+  HTTP.addHeader("Content-Type", "text/plain");
+  int httpCode = HTTP.PUT(values);
+  if (httpCode > 0) {
+    logs = "Data transfer: http://" + url + "/set" + values;
+  } else {
+    logs = "Error sending data to " + url;
+  }
+  HTTP.end();
+
   note(logs);
 }
 
-
-String get1Smart(int index) {
-  int found = 0;
-  int strIndex[] = {0, -1};
-  int maxIndex = smartString.length() - 1;
-
-  for (int i = 0; i <= maxIndex && found <= index; i++) {
-    if (smartString.charAt(i) == ',' || i == maxIndex) {
-      found++;
-      strIndex[0] = strIndex[1] + 1;
-      strIndex[1] = (i == maxIndex) ? i + 1 : i;
-    }
-  }
-  return found > index ? smartString.substring(strIndex[0], strIndex[1]) : "";
-}
-
-
-void getOfflineData() {
-  if (WiFi.status() != WL_CONNECTED || !offline) {
+void putMultiOfflineData(String values) {
+  if (WiFi.status() != WL_CONNECTED) {
     return;
   }
 
@@ -273,112 +318,60 @@ void getOfflineData() {
   if (n > 0) {
     String ip;
     String logs;
+    String devices;
 
     for (int i = 0; i < n; ++i) {
       ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
-      logs = "Get basic data from " + ip;
+
+      if (!strContains(devices, ip)) {
+        devices += ip + ",";
+
+        HTTP.begin("http://" + ip + "/set");
+        HTTP.addHeader("Content-Type", "text/plain");
+        int httpCode = HTTP.PUT(values);
+        if (httpCode > 0) {
+          logs += "\n http://" + ip + "/set" + values;
+        } else {
+          logs += "\n Error sending data to " + ip;
+        }
+        HTTP.end();
+      }
+    }
+
+    note("Data transfer between devices (" + String(n) + "): " + logs + "");
+  }
+}
+
+void getOfflineData(bool log) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  int n = MDNS.queryService("idom", "tcp");
+  if (n > 0) {
+    String ip;
+    String logs = "Received data...";
+
+    for (int i = 0; i < n; ++i) {
+      ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
+
       HTTP.begin("http://" + ip + "/basicdata");
       HTTP.addHeader("Content-Type", "text/plain");
       int httpCode = HTTP.GET();
 
       if (httpCode > 0 && httpCode == HTTP_CODE_OK) {
         String data = HTTP.getString();
-        logs = "Received basic data from " + ip + ": " + data;
+        logs +=  "\n " + ip + ": " + data;
         readData(data, true);
       } else {
-        logs += " failed!";
+        logs += "\n " + ip + " - failed! " + httpCode;
       }
 
       HTTP.end();
+    }
+
+    if (log) {
       note(logs);
     }
   }
-}
-
-void putOfflineData(String values) {
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-
-  int n = MDNS.queryService("idom", "tcp");
-  if (n == 0) {
-    return;
-  }
-
-  String ip;
-  String logs;
-
-  for (int i = 0; i < n; ++i) {
-    ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
-
-    HTTP.begin("http://" + ip + "/set");
-    HTTP.addHeader("Content-Type", "text/plain");
-    int httpCode = HTTP.PUT(values);
-    if (httpCode > 0) {
-      logs += "\nhttp://" + ip + "/set" + values;
-    } else {
-      logs += "\nError sending data to " + ip;
-    }
-    HTTP.end();
-  }
-
-  if (logs != "") {
-    note("Data transfer between devices (" + String(n) + "): " + logs + "");
-  }
-}
-
-void getOnlineData() {
-  // if (WiFi.status() != WL_CONNECTED || offline || blockGetOnlineData) {
-  //   return;
-  // }
-  //
-  // if (sendingError) {
-  //   sayHelloToTheServer();
-  // }
-  //
-  // blockGetOnlineData = true;
-  //
-  // HTTP.begin(baseURL + "/detail/" + device + "/?id=" + WiFi.macAddress() + "&up=" + updateTime);
-  // int httpCode = HTTP.GET();
-  //
-  // if (httpCode > 0) {
-  //   if (httpCode == HTTP_CODE_OK) {
-  //     readData(HTTP.getString(), false);
-  //   }
-  //   blockGetOnlineData = false;
-  // } else {
-  //   Serial.print(".");
-  //   blockGetOnlineData = false;
-  // }
-  //
-  // HTTP.end();
-}
-
-void putOnlineData(String variant, String values) {
-  // if (offline) {
-  //   return;
-  // }
-  //
-  // if (WiFi.status() != WL_CONNECTED) {
-  //   sendingError = true;
-  //   return;
-  // }
-  //
-  // HTTP.begin(baseURL + "/" + variant + "/" + device + "/?id=" + WiFi.macAddress() + "&" + values);
-  // int httpCode = HTTP.PUT("");
-  //
-  // if (httpCode > 0) {
-  //   if (httpCode == HTTP_CODE_OK) {
-  //     note("Data sent to the server:\n {" + values + "}");
-  //     readData(HTTP.getString(), false);
-  //     sendingError = false;
-  //   }
-  // } else {
-  //   if (!sendingError) {
-  //     note("Failure to send data to the server:\n {" + values + "}");
-  //   }
-  //   sendingError = true;
-  // }
-  //
-  // HTTP.end();
 }

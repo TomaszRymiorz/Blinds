@@ -49,6 +49,6 @@ Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protoko
 
 * "/measurement" - Służy do wykonania pomiaru wysokości okna.
 
-* "/delete/wifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.
+* "/wifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.
 
 * "/log" - Pod tym adresem znajduje się dziennik aktywności urządzenia (domyślnie wyłączony).
