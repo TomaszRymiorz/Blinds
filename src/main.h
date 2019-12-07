@@ -41,7 +41,8 @@ int calibration = 0;
 int wings = 123;
 
 int light = -1;
-uint32_t twilightCounter = 0;
+int twilightCounter = 0;
+int daybreakCounter = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
 bool blockTwilightCounter = false;
@@ -69,7 +70,7 @@ void initiateTheLightSensor();
 bool hasTheLightChanged();
 void readData(String payload, bool perWiFi);
 void setSmart();
-bool checkSmart(bool lightChanged);
+bool automaticSettings(bool lightChanged);
 void prepareCalibration(int set);
 void prepareRotation();
 void rotation();

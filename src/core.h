@@ -13,7 +13,7 @@ RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
-const int version = 10;
+const int version = 11;
 bool offline = true;
 bool keepLog = false;
 
@@ -27,6 +27,7 @@ uint32_t startTime = 0;
 uint32_t loopTime = 0;
 int uprisings = 1;
 int offset = 0;
+bool dst = false;
 bool twilight = false;
 
 String smartString = "0";
@@ -104,10 +105,10 @@ bool writeObjectToFile(String name, DynamicJsonDocument object) {
   name = "/" + name + ".txt";
 
   File file = SPIFFS.open(name, "w");
-  if (file) {
-    serializeJson(object, file);
+  if (file && object.size() > 0) {
+    bool result = serializeJson(object, file) > 2;
     file.close();
-    return true;
+    return result;
   }
   return false;
 }
@@ -176,6 +177,12 @@ void initiatingWPS() {
 
   WiFi.beginWPSConfig();
 
+  int timeout = 0;
+  while (timeout++ < 20 && WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+    delay(250);
+  }
   bool result = WiFi.status() == WL_CONNECTED;
 
   if (result) {

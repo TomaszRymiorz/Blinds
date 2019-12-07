@@ -9,7 +9,7 @@ void setup() {
 
   keepLog = SPIFFS.exists("/log.txt");
 
-  note("iDom Blinds " + String(bipolar ? "st" : "nx"));
+  note("iDom Blinds " + String(version) + String(bipolar ? " st" : " nx"));
   Serial.print("\nRoller blind ID: " + WiFi.macAddress());
   offline = !SPIFFS.exists("/online.txt");
   Serial.printf("\nThe roller blind is set to %s mode", offline ? "OFFLINE" : "ONLINE");
@@ -24,7 +24,7 @@ void setup() {
 
   RTC.begin();
   if (RTC.isrunning()) {
-    startTime = RTC.now().unixtime() - offset;
+    startTime = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
   }
   Serial.printf("\nRTC initialization %s", startTime != 0 ? "completed" : "failed!");
 
@@ -82,7 +82,7 @@ bool readSettings(bool backup) {
   deserializeJson(jsonObject, file.readString());
   file.close();
 
-  if (jsonObject.isNull()) {
+  if (jsonObject.isNull() || jsonObject.size() == 0) {
     note(String(backup ? "Backup" : "Settings") + " file error");
     return false;
   }
@@ -103,6 +103,9 @@ bool readSettings(bool backup) {
   }
   if (jsonObject.containsKey("offset")) {
     offset = jsonObject["offset"].as<int>();
+  }
+  if (jsonObject.containsKey("dst")) {
+    dst = jsonObject["dst"].as<bool>();
   }
   if (jsonObject.containsKey("sunset")) {
     sunset = jsonObject["sunset"].as<int>();
@@ -158,6 +161,7 @@ void saveSettings() {
   jsonObject["smart"] = smartString;
   jsonObject["uprisings"] = uprisings;
   jsonObject["offset"] = offset;
+  jsonObject["dst"] = dst;
   jsonObject["sunset"] = sunset;
   jsonObject["sunrise"] = sunrise;
   jsonObject["boundary"] = boundary;
@@ -290,7 +294,8 @@ void handshake() {
   + "\",\"steps\":\"" + steps1 + "." + steps2 + "." + steps3
   + "\",\"boundary\":" + boundary
   + ",\"rtc\":" + RTC.isrunning()
-  + ",\"active\":" + (startTime != 0 ? RTC.now().unixtime() - offset - startTime : 0)
+  + ",\"dst\":" + dst
+  + ",\"active\":" + (startTime != 0 ? RTC.now().unixtime() - offset - (dst ? 3600 : 0) - startTime : 0)
   + ",\"uprisings\":" + uprisings
   + ",\"offline\":" + offline
   + ",\"prime\":" + prime
@@ -318,7 +323,7 @@ void requestForState() {
 }
 
 void requestForBasicData() {
-  String reply = RTC.isrunning() ? ("\"time\":" + String(RTC.now().unixtime() - offset)) : "";
+  String reply = RTC.isrunning() ? ("\"time\":" + String(RTC.now().unixtime() - offset - (dst ? 3600 : 0))) : "";
   reply += light > -1 ? (String(reply.length() > 0 ? "," : "") + "\"light\":\"" + String(light) + String(twilight ? "t" : "")) + "\"" : "";
   reply += !offline && prime ? (String(reply.length() > 0 ? "," : "") + "\"prime\":" + String(prime)) : "";
 
@@ -427,6 +432,9 @@ void endMeasurement() {
 
 void initiateTheLightSensor() {
   int light = analogRead(light_sensor_pin);
+  if (light < 1) {
+    light = 1;
+  }
   twilight = light < boundary;
 
   if (!offline) {
@@ -440,6 +448,7 @@ void initiateTheLightSensor() {
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
   } else {
+    sendingError = true;
     if (measurement) {
       measurement = false;
     }
@@ -481,7 +490,7 @@ void loop() {
         }
       }
     }
-    if (!checkSmart(hasTheLightChanged()) && loopTime % 2 == 0) {
+    if (!automaticSettings(hasTheLightChanged()) && loopTime % 2 == 0) {
       getOnlineData();
     };
   }
@@ -515,7 +524,7 @@ bool hasTheLightChanged() {
       return false;
     }
   } else {
-    if (abs(light - newLight) > 20) {
+    if (abs(light - newLight) > (newLight < 30 ? 5 : 20)) {
       light = newLight;
       change = true;
     }
@@ -525,39 +534,43 @@ bool hasTheLightChanged() {
   bool sent = false;
 
   if (blockTwilightCounter) {
-    if (light < boundary - 50 || light > boundary + 50) {
+    if (light < boundary - (boundary < 100 ? 0 : 50) || light > boundary + 50) {
       blockTwilightCounter = false;
     }
   } else {
-    if (twilight != (light < (twilight ? boundary - 50 : boundary + 50))) {
+    if (twilight != (light < (twilight ? boundary - (boundary < 100 ? 0 : 50) : boundary + 50))) {
       change = true;
       if (++twilightCounter > 9 && (twilight ? light > boundary : light < boundary)) {
         twilight = light < boundary;
         result = true;
         blockTwilightCounter = true;
         twilightCounter = 0;
-        putMultiOfflineData("{\"light\":" + String(light) + String(twilight ? "t" : "") + "}");
-
-        if (RTC.isrunning()) {
-          if (twilight) {
-            if (sunset <= sunrise || RTC.now().unixtime() - offset - sunset > 36000) {
-              sunset = RTC.now().unixtime() - offset;
-              putOnlineData("detail", "set=" + String(sunset) + "&light=" + String(light) + String(twilight ? "t" : ""));
-              saveSettings();
-              sent = true;
-            }
-          } else {
-            if (sunrise <= sunset || RTC.now().unixtime() - offset - sunrise > 36000) {
-              sunrise = RTC.now().unixtime() - offset;
-              putOnlineData("detail", "rise=" + String(sunrise) + "&light=" + String(light) + String(twilight ? "t" : ""));
-              saveSettings();
-              sent = true;
-            }
-          }
-        }
+        putMultiOfflineData("{\"light\":\"" + String(light) + String(twilight ? "t" : "") + "\"}");
       }
     } else {
       twilightCounter = 0;
+    }
+  }
+
+  if (RTC.isrunning()) {
+    if (twilight) {
+      if (light < 75 && (sunset <= sunrise || (RTC.now().unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000))) {
+        sunset = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
+        putOnlineData("detail", "set=" + String(sunset) + "&light=" + String(light) + "t");
+        saveSettings();
+        sent = true;
+      }
+    }
+    if (light > 115 && sunrise <= sunset) {
+      if (++daybreakCounter > 9) {
+        sunrise = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
+        putOnlineData("detail", "rise=" + String(sunrise) + "&light=" + String(light));
+        saveSettings();
+        sent = true;
+        daybreakCounter = 0;
+      }
+    } else {
+      daybreakCounter = 0;
     }
   }
 
@@ -577,6 +590,10 @@ void readData(String payload, bool perWiFi) {
       Serial.print("\n Parsing failed!");
     }
     return;
+  }
+
+  if (jsonObject.containsKey("apk")) {
+    perWiFi = jsonObject["apk"].as<bool>();
   }
 
   if (jsonObject.containsKey("calibrate")) {
@@ -614,6 +631,23 @@ void readData(String payload, bool perWiFi) {
     }
   }
 
+  if (jsonObject.containsKey("dst")) {
+    bool newDST = jsonObject["dst"].as<bool>();
+    if (dst != newDST) {
+      dst = newDST;
+      saveSettings();
+
+      if (!dst) {
+        int newTime = RTC.now().unixtime() + 3600;
+        RTC.adjust(DateTime(newTime));
+      }
+      if (dst) {
+        int newTime = RTC.now().unixtime() - 3600;
+        RTC.adjust(DateTime(newTime));
+      }
+    }
+  }
+
   if (jsonObject.containsKey("time")) {
     newTime = jsonObject["time"].as<uint32_t>() + offset;
     if (newTime > 1546304461) {
@@ -624,9 +658,11 @@ void readData(String payload, bool perWiFi) {
         }
       } else {
         RTC.adjust(DateTime(newTime));
-        startTime = RTC.now().unixtime() - offset;
+        startTime = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
         note("Adjust time");
-        sayHelloToTheServer();
+        if (RTC.isrunning()) {
+          sayHelloToTheServer();
+        }
       }
     }
   }
@@ -706,7 +742,7 @@ void readData(String payload, bool perWiFi) {
     String newLight = jsonObject["light"].as<String>();
     if (twilight != strContains(newLight, "t")) {
       twilight = !twilight;
-      checkSmart(true);
+      automaticSettings(true);
     }
   }
 
@@ -785,7 +821,7 @@ void setSmart() {
   }
 }
 
-bool checkSmart(bool lightChanged) {
+bool automaticSettings(bool lightChanged) {
   bool result = false;
   DateTime now = RTC.now();
   String log = "The smart function has activated ";
@@ -806,10 +842,10 @@ bool checkSmart(bool lightChanged) {
             destination3 = steps3;
           }
           result = true;
-          log += "lowering the roller blind for the night";
+          log += "lowering the roller blind for the twilight";
         }
         if (!twilight && smartArray[i].liftingAtDay
-          && (strContains(smartArray[i].days, "w") || (RTC.isrunning() && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() != 0 ? now.dayOfTheWeek() - 1 : now.dayOfTheWeek() + 6])))) {
+          && (strContains(smartArray[i].days, "w") || (RTC.isrunning() && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])))) {
           if (strContains(smartArray[i].wing, "1")) {
             destination1 = 0;
           }
@@ -820,14 +856,30 @@ bool checkSmart(bool lightChanged) {
             destination3 = 0;
           }
           result = true;
-          log += "lifting the roller blind for the day";
+          log += "lifting the roller blind for the daybreak";
         }
       } else {
         if (RTC.isrunning()) {
           int currentTime = (now.hour() * 60) + now.minute();
 
+          if (currentTime == 120 || currentTime == 180) {
+            if (now.month() == 3 && now.day() > 24 && daysOfTheWeek[now.dayOfTheWeek()][0] == 's' && currentTime == 120 && !dst) {
+              int newTime = RTC.now().unixtime() + 3600;
+              RTC.adjust(DateTime(newTime));
+              dst = true;
+              saveSettings();
+            }
+            if (now.month() == 10 && now.day() > 24 && daysOfTheWeek[now.dayOfTheWeek()][0] == 's' && currentTime == 180 && dst) {
+              int newTime = RTC.now().unixtime() - 3600;
+              RTC.adjust(DateTime(newTime));
+              dst = false;
+              saveSettings();
+            }
+          }
+
           if (smartArray[i].access + 60 < now.unixtime()) {
-            if (smartArray[i].loweringTime == currentTime && strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()])) {
+            if (smartArray[i].loweringTime == currentTime
+              && (strContains(smartArray[i].days, "w") || strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]))) {
               smartArray[i].access = now.unixtime();
               if (strContains(smartArray[i].wing, "1")) {
                 destination1 = steps1;
@@ -841,7 +893,8 @@ bool checkSmart(bool lightChanged) {
               result = true;
               log += "lowering the roller blind on time";
             }
-            if (smartArray[i].liftingTime == currentTime && (strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]) || strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek() != 0 ? now.dayOfTheWeek() - 1 : now.dayOfTheWeek() + 6]))) {
+            if (smartArray[i].liftingTime == currentTime
+              && (strContains(smartArray[i].days, "w") || strContains(smartArray[i].days, daysOfTheWeek[now.dayOfTheWeek()]))) {
               smartArray[i].access = now.unixtime();
               if (strContains(smartArray[i].wing, "1")) {
                 destination1 = 0;
