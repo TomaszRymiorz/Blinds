@@ -1,8 +1,8 @@
-# Blinds nx
+# Blinds
 Oprogramowanie rolety automatycznego domu.
 
 ### Budowa rolety
-Mechanizm rolety zbudowany jest w oparciu o ESP8266 wraz z modułem RTC DS1307. Całości dopełniają silniki krokowe 28BYJ-48 ze sterownikiem oraz fotorezystor pełniący funkcję czujnika zmierzchowego.
+Mechanizm rolety zbudowany jest w oparciu o ESP8266 wraz z modułem RTC DS1307. Całości dopełniają bipolarne silniki krokowe ze sterownikiem oraz fotorezystor pełniący funkcję czujnika zmierzchowego.
 
 ### Możliwości
 Łączność z roletą odbywa się przez sieć Wi-Fi.
