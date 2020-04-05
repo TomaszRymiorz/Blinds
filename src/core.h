@@ -13,11 +13,11 @@ RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 
-const int version = 11;
+// core version = 12;
 bool offline = true;
 bool keepLog = false;
 
-const char daysOfTheWeek[7][12] = {"s", "o", "u", "e", "h", "r", "a"};
+const char daysOfTheWeek[7][2] = {"s", "o", "u", "e", "h", "r", "a"};
 char hostName[30] = {0};
 
 String ssid = "";
@@ -28,7 +28,6 @@ uint32_t loopTime = 0;
 int uprisings = 1;
 int offset = 0;
 bool dst = false;
-bool twilight = false;
 
 String smartString = "0";
 Smart *smartArray;
@@ -54,7 +53,7 @@ void getOfflineData(bool log);
 
 
 bool strContains(String text, String value) {
-  return text.indexOf(value) != -1;
+  return text.indexOf(value) > -1;
 }
 
 bool hasTimeChanged() {
@@ -139,6 +138,7 @@ void connectingToWifi() {
   delay(100);
 
   WiFi.begin(ssid.c_str(), password.c_str());
+
   int timeout = 0;
   while (timeout++ < 20 && WiFi.status() != WL_CONNECTED) {
     delay(250);
@@ -150,7 +150,7 @@ void connectingToWifi() {
 
   if (result) {
     logs = "Connected to " + WiFi.SSID();
-    logs += "\n IP address: " + WiFi.localIP().toString();
+    logs += " : " + WiFi.localIP().toString();
   } else {
     logs += " timed out";
   }
@@ -162,6 +162,7 @@ void connectingToWifi() {
     startServices();
     sayHelloToTheServer();
   } else {
+    delay(1000);
     initiatingWPS();
   }
 }
@@ -173,8 +174,8 @@ void initiatingWPS() {
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  WiFi.begin();
 
+  WiFi.begin();
   WiFi.beginWPSConfig();
 
   int timeout = 0;
@@ -183,14 +184,15 @@ void initiatingWPS() {
     Serial.print(".");
     delay(250);
   }
+
   bool result = WiFi.status() == WL_CONNECTED;
 
   if (result) {
     ssid = WiFi.SSID();
     password = WiFi.psk();
 
-    logs += " finished";
-    logs += "\n Connected to " + WiFi.SSID();
+    logs += " finished. ";
+    logs += "Connected to " + WiFi.SSID();
   } else {
     logs += " timed out";
   }
@@ -201,8 +203,13 @@ void initiatingWPS() {
     startServices();
     sayHelloToTheServer();
   } else {
+    if (hasTimeChanged()) {
+      automaticSettings();
+    }
     if (ssid != "" && password != "") {
       connectingToWifi();
+    } else {
+      initiatingWPS();
     }
   }
 }
@@ -246,6 +253,7 @@ void requestForLogs() {
     server.send(404, "text/plain", "No log file");
     return;
   }
+
   Serial.print("\nA log file was requested");
 
   server.setContentLength(file.size() + String("Log file\nHTTP/1.1 200 OK").length());
@@ -268,10 +276,12 @@ void clearTheLog() {
     String logs = "The log file was cleared";
     server.send(200, "text/plain", logs);
     Serial.print("\n" + logs);
-  } else {
-    server.send(404, "text/plain", "Failed!");
+    return;
   }
+
+  server.send(404, "text/plain", "Failed!");
 }
+
 
 void deleteWiFiSettings() {
   ssid = "";
@@ -306,11 +316,13 @@ void putOfflineData(String url, String values) {
   HTTP.begin("http://" + url + "/set");
   HTTP.addHeader("Content-Type", "text/plain");
   int httpCode = HTTP.PUT(values);
+
   if (httpCode > 0) {
-    logs = "Data transfer: http://" + url + "/set" + values;
+    logs = "Data transfer:\n http://" + url + "/set" + values;
   } else {
     logs = "Error sending data to " + url;
   }
+
   HTTP.end();
 
   note(logs);
@@ -336,11 +348,13 @@ void putMultiOfflineData(String values) {
         HTTP.begin("http://" + ip + "/set");
         HTTP.addHeader("Content-Type", "text/plain");
         int httpCode = HTTP.PUT(values);
+
         if (httpCode > 0) {
           logs += "\n http://" + ip + "/set" + values;
         } else {
           logs += "\n Error sending data to " + ip;
         }
+
         HTTP.end();
       }
     }
