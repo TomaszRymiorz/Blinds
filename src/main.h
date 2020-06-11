@@ -1,14 +1,13 @@
 #include <Arduino.h>
 
 const char device[7] = "blinds";
-const int version = 12;
+const int version = 13;
 
 const int light_sensor_pin = A0;
 
 const int bipolar_enable_pin = D3;
 const int bipolar_direction_pin = D6;
 const int bipolar_step_pin[] = {D5, D7, D8}; // stepper1, stepper2, stepper3
-
 
 int boundary = 300;
 int steps1 = 0;
@@ -23,6 +22,8 @@ struct Smart {
   bool liftingAtDay;
   int loweringTime;
   int liftingTime;
+  bool loweringAtNightAndTime;
+  bool liftingAtDayAndTime;
   bool enabled;
   uint32_t access;
 };
@@ -61,7 +62,8 @@ String getBlindsDetail();
 String getLightStatus();
 void handshake();
 void requestForState();
-void requestForBasicData();
+void exchangeOfBasicData();
+void confirmationOfPriority();
 void reverseDirection();
 void setMin();
 void setMax();
@@ -69,6 +71,7 @@ void makeMeasurement();
 void cancelMeasurement();
 void endMeasurement();
 void initiateTheLightSensor();
+void deactivateTheLightSensor();
 bool hasTheLightChanged();
 void readData(String payload, bool perWiFi);
 void setSmart();

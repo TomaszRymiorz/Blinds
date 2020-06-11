@@ -1,6 +1,6 @@
 #include <Wire.h>
 #include <SPI.h>
-#include <FS.h>
+#include <LittleFS.h>
 #include <RTClib.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -12,13 +12,16 @@
 RTC_DS1307 RTC;
 ESP8266WebServer server(80);
 HTTPClient HTTP;
+WiFiClient WIFI;
 
-// core version = 12;
+// core version = 13;
 bool offline = true;
+bool prime = false;
 bool keepLog = false;
 
 const char daysOfTheWeek[7][2] = {"s", "o", "u", "e", "h", "r", "a"};
 char hostName[30] = {0};
+String devices = "";
 
 String ssid = "";
 String password = "";
@@ -37,7 +40,7 @@ bool strContains(String text, String value);
 bool hasTimeChanged();
 void note(String text);
 bool writeObjectToFile(String name, DynamicJsonDocument object);
-String get1Smart(int index);
+String get1(String text, int index);
 void connectingToWifi();
 void initiatingWPS();
 void activationTheLog();
@@ -46,10 +49,11 @@ void requestForLogs();
 void clearTheLog();
 void deleteWiFiSettings();
 void deleteDeviceMemory();
+int findMDNSDevices();
 void receivedOfflineData();
 void putOfflineData(String url, String values);
 void putMultiOfflineData(String values);
-void getOfflineData(bool log);
+void getOfflineData(bool log, bool allData);
 
 
 bool strContains(String text, String value) {
@@ -90,7 +94,7 @@ void note(String text) {
   logs += "] " + text;
 
   if (keepLog) {
-    File file = SPIFFS.open("/log.txt", "a");
+    File file = LittleFS.open("/log.txt", "a");
     if (file) {
       file.println(logs);
       file.close();
@@ -103,7 +107,7 @@ void note(String text) {
 bool writeObjectToFile(String name, DynamicJsonDocument object) {
   name = "/" + name + ".txt";
 
-  File file = SPIFFS.open(name, "w");
+  File file = LittleFS.open(name, "w");
   if (file && object.size() > 0) {
     bool result = serializeJson(object, file) > 2;
     file.close();
@@ -112,19 +116,19 @@ bool writeObjectToFile(String name, DynamicJsonDocument object) {
   return false;
 }
 
-String get1Smart(int index) {
+String get1(String text, int index) {
   int found = 0;
   int strIndex[] = {0, -1};
-  int maxIndex = smartString.length() - 1;
+  int maxIndex = text.length() - 1;
 
   for (int i = 0; i <= maxIndex && found <= index; i++) {
-    if (smartString.charAt(i) == ',' || i == maxIndex) {
+    if (text.charAt(i) == ',' || i == maxIndex) {
       found++;
       strIndex[0] = strIndex[1] + 1;
       strIndex[1] = (i == maxIndex) ? i + 1 : i;
     }
   }
-  return found > index ? smartString.substring(strIndex[0], strIndex[1]) : "";
+  return found > index ? text.substring(strIndex[0], strIndex[1]) : "";
 }
 
 
@@ -220,7 +224,7 @@ void activationTheLog() {
     return;
   }
 
-  File file = SPIFFS.open("/log.txt", "a");
+  File file = LittleFS.open("/log.txt", "a");
   if (file) {
     file.println();
     file.close();
@@ -237,8 +241,8 @@ void deactivationTheLog() {
     return;
   }
 
-  if (SPIFFS.exists("/log.txt")) {
-    SPIFFS.remove("/log.txt");
+  if (LittleFS.exists("/log.txt")) {
+    LittleFS.remove("/log.txt");
   }
   keepLog = false;
 
@@ -248,7 +252,7 @@ void deactivationTheLog() {
 }
 
 void requestForLogs() {
-  File file = SPIFFS.open("/log.txt", "r");
+  File file = LittleFS.open("/log.txt", "r");
   if (!file) {
     server.send(404, "text/plain", "No log file");
     return;
@@ -266,8 +270,8 @@ void requestForLogs() {
 }
 
 void clearTheLog() {
-  if (SPIFFS.exists("/log.txt")) {
-    File file = SPIFFS.open("/log.txt", "w");
+  if (LittleFS.exists("/log.txt")) {
+    File file = LittleFS.open("/log.txt", "w");
     if (file) {
       file.println();
       file.close();
@@ -294,7 +298,30 @@ void deleteWiFiSettings() {
 }
 
 
+int findMDNSDevices() {
+  int n = MDNS.queryService("idom", "tcp");
+  String ip;
+  if (n > 0) {
+    for (int i = 0; i < n; ++i) {
+      ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
+      if (!strContains(devices, ip)) {
+        devices += (devices.length() > 0 ? "," : "" ) + ip;
+      }
+    }
+  }
 
+  if (devices.length() > 0) {
+    int count = 1;
+    for (byte b: devices) {
+      if (b == ',') {
+        count++;
+      }
+    }
+    return count;
+  } else {
+    return 0;
+  }
+}
 
 void receivedOfflineData() {
   if (server.hasArg("plain")) {
@@ -314,7 +341,6 @@ void putOfflineData(String url, String values) {
   String logs;
 
   HTTP.begin("http://" + url + "/set");
-  HTTP.addHeader("Content-Type", "text/plain");
   int httpCode = HTTP.PUT(values);
 
   if (httpCode > 0) {
@@ -333,66 +359,63 @@ void putMultiOfflineData(String values) {
     return;
   }
 
-  int n = MDNS.queryService("idom", "tcp");
-  if (n > 0) {
-    String ip;
-    String logs;
-    String devices;
+  int count = findMDNSDevices();
+  if (count == 0) {
+    return;
+  }
 
-    for (int i = 0; i < n; ++i) {
-      ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
+  String ip;
+  String logs = "";
 
-      if (!strContains(devices, ip)) {
-        devices += ip + ",";
+  for (int i = 0; i < count; i++) {
+    ip = get1(devices, i);
 
-        HTTP.begin("http://" + ip + "/set");
-        HTTP.addHeader("Content-Type", "text/plain");
-        int httpCode = HTTP.PUT(values);
+    HTTP.begin("http://" + ip + "/set");
+    int httpCode = HTTP.PUT(values);
 
-        if (httpCode > 0) {
-          logs += "\n http://" + ip + "/set" + values;
-        } else {
-          logs += "\n Error sending data to " + ip;
-        }
-
-        HTTP.end();
-      }
+    if (httpCode > 0) {
+      logs += "\n http://" + ip + "/set" + values;
+    } else {
+      logs += "\n Error sending data to " + ip;
     }
 
-    note("Data transfer between devices (" + String(n) + "): " + logs + "");
+    HTTP.end();
   }
+
+  note("Data transfer between devices (" + String(count) + "): " + logs + "");
 }
 
-void getOfflineData(bool log) {
+void getOfflineData(bool log, bool allData) {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
 
-  int n = MDNS.queryService("idom", "tcp");
-  if (n > 0) {
-    String ip;
-    String logs = "Received data...";
+  int count = findMDNSDevices();
+  if (count == 0) {
+    return;
+  }
 
-    for (int i = 0; i < n; ++i) {
-      ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
+  String ip;
+  String logs = "Received data...";
 
-      HTTP.begin("http://" + ip + "/basicdata");
-      HTTP.addHeader("Content-Type", "text/plain");
-      int httpCode = HTTP.GET();
+  for (int i = 0; i < count; i++) {
+    ip = get1(devices, i);
 
-      if (httpCode > 0 && httpCode == HTTP_CODE_OK) {
-        String data = HTTP.getString();
-        logs +=  "\n " + ip + ": " + data;
-        readData(data, true);
-      } else {
-        logs += "\n " + ip + " - failed! " + httpCode;
-      }
+    HTTP.begin(WIFI, "http://" + ip + "/" + (allData ? "basicdata" : "priority"));
+    int httpCode = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
 
-      HTTP.end();
+    String data = HTTP.getString();
+    if (httpCode > 0 && httpCode == HTTP_CODE_OK) {
+      logs +=  "\n " + ip + ": " + data;
+      readData(data, true);
+    } else {
+      logs += "\n " + ip + " - failed! " + httpCode + "/" + data;
     }
 
-    if (log) {
-      note(logs);
-    }
+    HTTP.end();
+  }
+
+  if (log) {
+    note(logs);
   }
 }
