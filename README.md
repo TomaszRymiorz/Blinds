@@ -2,7 +2,7 @@
 Oprogramowanie rolety automatycznego domu.
 
 ### Budowa rolety
-Mechanizm rolety zbudowany jest w oparciu o ESP8266 wraz z modułem RTC DS1307. Całości dopełnia silnik krokowy ze sterownikiem A4988 oraz fotorezystor pełniący funkcję czujnika zmierzchowego.
+Mechanizm rolety został zbudowany na bazie ESP8266 wraz z modułem RTC DS1307 oraz fotorezystor pełniący funkcję czujnika światła. Uzupełnieniem jest silnik krokowy ze sterownikiem A4988 .
 
 ### Możliwości
 Łączność z roletą odbywa się przez sieć Wi-Fi.
@@ -13,15 +13,15 @@ Roleta automatycznie łączy się z zaprogramowaną siecią Wi-Fi w przypadku ut
 
 Zawiera czujnik światła wykorzystywany przez funkcje automatycznych ustawień. Dane z czujnika przesyłane są również do pozostałych urządzeń działających w systemie iDom będących w tej samej sieci Wi-Fi.
 
-Urządzenie posiada opcję wykonania pomiaru wysokości okna, zmianę kierunku obrotów silnika oraz możliwość kalibracji rolet. Funkcja pomiaru okna wyklucza stosowanie ograniczników krańcowych, a w przypadku wartości zdefiniowanych programowo zapobiega pomyłkom błędnie podanych ręcznie wartości lub ewentualnych różnic w silnikach.
+Urządzenie posiada opcję wykonania pomiaru wysokości okna, zmianę kierunku obrotów silnika oraz możliwość kalibracji rolet. Funkcja pomiaru okna wyklucza stosowanie ograniczników krańcowych.
 
 Zegar czasu rzeczywistego wykorzystywany jest przez funkcję ustawień automatycznych.
 Ustawienia automatyczne obejmują opuszczanie i podnoszenie rolety o wybranej godzinie lub opuszczanie po zmroku / podnoszenie o świcie.
-Możliwe jest również, że roleta opuści / podniesie się dopiero po spełnieniu obydwu warunków, np. "podnieś o świcie, ale nie wcześniej niż o 6:00".
+Możliwe jest również, że roleta opuści / podniesie się dopiero po spełnieniu obydwu warunków, np. "Podnieś o świcie, ale nie wcześniej niż o 6:00".
 Powtarzalność obejmuje okres jednego tygodnia, a ustawienia nie są ograniczone ilościowo. W celu zminimalizowania objętości wykorzystany został zapis tożsamy ze zmienną boolean, czyli dopiero wystąpienie znaku wskazuje na włączoną funkcję.
 
-* '4' wszystkie rolety, którymi steruje urządzenie
 * '1', '2', '3' numer rolety, którą steruje urządzenie
+* '4' wszystkie rolety, którymi steruje urządzenie
 * 'w' cały tydzień
 * 'o' poniedziałek, 'u' wtorek, 'e' środa, 'h' czwartek, 'r' piątek, 'a' sobota, 's' niedziela
 * 'n' opuść po zmroku
@@ -34,18 +34,16 @@ Powtarzalność obejmuje okres jednego tygodnia, a ustawienia nie są ograniczon
 
 Przykład zapisu trzech różnych ustawień automatycznych: 1140_b3w-420,b4asn,/b12ouehrn-300
 
-Ustawienia automatyczne obejmują również inne urządzenia - obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
+Obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
 
 ### Sterowanie
-Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protokole HTTP. Sterować można z przeglądarki lub dedykowanej aplikacji.
+Sterowanie urządzeniem odbywa się poprzez wykorzystanie metod dostępnych w protokole HTTP. Sterować można z przeglądarki lub dedykowanej aplikacji.
 
-* "/hello" - Handshake wykorzystywany przez dedykowaną aplikację, służy do potwierdzenia tożsamości oraz przesłaniu parametrów pracy rolety.
+* "/hello" - Handshake wykorzystywany przez dedykowaną aplikację, służy do potwierdzenia tożsamości oraz przesłaniu wszystkich parametrów pracy urządzenia.
 
-* "/set" - Pod ten adres przesyłane są ustawienia dla rolety, dane przesyłane w formacie JSON. Ustawić można m.in. strefę czasową ("offset"), czas RTC ("time"), ustawienia automatyczne ("smart"), pozycję rolety na oknie ("val"), dokonać kalibracji pozycji, jak również zmienić ilość kroków czy wartość granicy dnia.
+* "/set" - Pod ten adres przesyłane są ustawienia dla rolety, dane przesyłane w formacie JSON. Ustawić można m.in. strefę czasową ("offset"), czas RTC ("time"), ustawienia automatyczne ("smart"), pozycję rolety na oknie ("val"), dokonać kalibracji pozycji, jak również zmienić ilość kroków czy wartość granicy dnia i nocy.
 
-* "/state" - Służy do regularnego odpytywania rolety o jej podstawowe stany, położenie rolety i wskazania czujnika oświetlenia, a także w przypadku wykonywania pomiaru okna ("measure") - ilość kroków silnika.
-
-* "/basicdata" - Służy innym urządzeniom systemu iDom do samokontroli. Jeśli któreś urządzenie po uruchomieniu nie pamięta aktualnej godziny lub nie posiada czujnika światła, ta funkcja zwraca aktualną godzinę i dane z czujnika.
+* "/state" - Służy do regularnego odpytywania urządzenia o jego podstawowe stany, położenie rolety i wskazania czujnika oświetlenia.
 
 * "/reversed" - Odpytanie tego adresu zmienia kierunek obracania się silnika rolety.
 
@@ -53,4 +51,8 @@ Sterowanie roletą odbywa się poprzez wykorzystanie metod dostępnych w protoko
 
 * "/measurement" - Służy do wykonania pomiaru wysokości okna.
 
+* "/basicdata" - Służy innym urządzeniom systemu iDom do samokontroli, urządzenia po uruchomieniu odpytują się wzajemnie o aktualny czas lub dane z czujników.
+
 * "/log" - Pod tym adresem znajduje się dziennik aktywności urządzenia (domyślnie wyłączony).
+
+* "/wifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.

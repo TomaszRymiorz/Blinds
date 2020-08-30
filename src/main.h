@@ -1,30 +1,32 @@
 #include <Arduino.h>
 
 const char device[7] = "blinds";
-const int version = 13;
+const int version = 14;
 
 const int light_sensor_pin = A0;
 
-const int bipolar_enable_pin = D3;
-const int bipolar_direction_pin = D6;
-const int bipolar_step_pin[] = {D5, D7, D8}; // stepper1, stepper2, stepper3
+const int bipolar_enable_pin[] = {D6, D7, D8}; // stepper1, stepper2, stepper3
+const int bipolar_direction_pin = D5;
+const int bipolar_step_pin = D3;
 
-int boundary = 300;
+int boundary = 200;
 int steps1 = 0;
 int steps2 = 0;
 int steps3 = 0;
 bool reversed = false;
+bool separately = false;
+bool inverted_sequence = false;
 
 struct Smart {
+  bool enabled;
   String wing;
   String days;
-  bool loweringAtNight;
-  bool liftingAtDay;
-  int loweringTime;
-  int liftingTime;
-  bool loweringAtNightAndTime;
-  bool liftingAtDayAndTime;
-  bool enabled;
+  bool lowering_at_night;
+  bool lifting_at_day;
+  int lowering_time;
+  int lifting_time;
+  bool lowering_at_night_and_time;
+  bool lifting_at_day_and_time;
   uint32_t access;
 };
 
@@ -34,21 +36,19 @@ int destination3 = 0;
 int actual1 = 0;
 int actual2 = 0;
 int actual3 = 0;
-int step = 0;
 
 bool measurement = false;
-int calibration = 0;
 int wings = 123;
 
 int light = -1;
-int twilightCounter = 0;
-int daybreakCounter = 0;
+int twilight_counter = 0;
+int daybreak_counter = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
-bool blockTwilightCounter = false;
+bool block_twilight_counter = false;
 bool twilight = false;
 
-void setStepperPins(bool setMode);
+void setStepperOff();
 String toPercentages(int value, int steps);
 int toSteps(int value, int steps);
 bool readSettings(bool backup);
@@ -59,25 +59,25 @@ void sayHelloToTheServer();
 void introductionToServer();
 void startServices();
 String getBlindsDetail();
-String getLightStatus();
+String getSensorDetail();
 void handshake();
 void requestForState();
 void exchangeOfBasicData();
-void confirmationOfPriority();
 void reverseDirection();
 void setMin();
 void setMax();
+void setAsMax();
 void makeMeasurement();
 void cancelMeasurement();
 void endMeasurement();
 void initiateTheLightSensor();
 void deactivateTheLightSensor();
 bool hasTheLightChanged();
-void readData(String payload, bool perWiFi);
+void readData(String payload, bool per_wifi);
 void setSmart();
 bool automaticSettings();
-bool automaticSettings(bool lightChanged);
-void prepareCalibration(int set);
+bool automaticSettings(bool twilight_changed);
 void prepareRotation();
+void calibration(int set, bool bypass);
+void measurementRotation();
 void rotation();
-void bipolarRotation();

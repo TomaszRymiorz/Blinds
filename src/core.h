@@ -14,33 +14,33 @@ ESP8266WebServer server(80);
 HTTPClient HTTP;
 WiFiClient WIFI;
 
-// core version = 13;
+// core version = 14;
 bool offline = true;
-bool prime = false;
-bool keepLog = false;
+bool keep_log = false;
 
-const char daysOfTheWeek[7][2] = {"s", "o", "u", "e", "h", "r", "a"};
-char hostName[30] = {0};
+const char days_of_the_week[7][2] = {"s", "o", "u", "e", "h", "r", "a"};
+char host_name[30] = {0};
 String devices = "";
 
 String ssid = "";
 String password = "";
 
-uint32_t startTime = 0;
-uint32_t loopTime = 0;
+uint32_t start_time = 0;
+uint32_t loop_time = 0;
 int uprisings = 1;
 int offset = 0;
 bool dst = false;
 
-String smartString = "0";
-Smart *smartArray;
-int smartCount = 0;
+String smart_string = "0";
+Smart *smart_array;
+int smart_count = 0;
 
 bool strContains(String text, String value);
 bool hasTimeChanged();
 void note(String text);
 bool writeObjectToFile(String name, DynamicJsonDocument object);
 String get1(String text, int index);
+String getSmartString();
 void connectingToWifi();
 void initiatingWPS();
 void activationTheLog();
@@ -53,7 +53,7 @@ int findMDNSDevices();
 void receivedOfflineData();
 void putOfflineData(String url, String values);
 void putMultiOfflineData(String values);
-void getOfflineData(bool log, bool allData);
+void getOfflineData(bool log, bool all_data);
 
 
 bool strContains(String text, String value) {
@@ -61,9 +61,9 @@ bool strContains(String text, String value) {
 }
 
 bool hasTimeChanged() {
-  uint32_t currentTime = RTC.isrunning() ? RTC.now().unixtime() : millis() / 1000;
-  if (abs(currentTime - loopTime) >= 1) {
-    loopTime = currentTime;
+  uint32_t current_time = RTC.isrunning() ? RTC.now().unixtime() : millis() / 1000;
+  if (abs(current_time - loop_time) >= 1) {
+    loop_time = current_time;
     return true;
   }
   return false;
@@ -93,7 +93,7 @@ void note(String text) {
   }
   logs += "] " + text;
 
-  if (keepLog) {
+  if (keep_log) {
     File file = LittleFS.open("/log.txt", "a");
     if (file) {
       file.println(logs);
@@ -118,17 +118,23 @@ bool writeObjectToFile(String name, DynamicJsonDocument object) {
 
 String get1(String text, int index) {
   int found = 0;
-  int strIndex[] = {0, -1};
-  int maxIndex = text.length() - 1;
+  int str_index[] = {0, -1};
+  int max_index = text.length() - 1;
 
-  for (int i = 0; i <= maxIndex && found <= index; i++) {
-    if (text.charAt(i) == ',' || i == maxIndex) {
+  for (int i = 0; i <= max_index && found <= index; i++) {
+    if (text.charAt(i) == ',' || i == max_index) {
       found++;
-      strIndex[0] = strIndex[1] + 1;
-      strIndex[1] = (i == maxIndex) ? i + 1 : i;
+      str_index[0] = str_index[1] + 1;
+      str_index[1] = (i == max_index) ? i + 1 : i;
     }
   }
-  return found > index ? text.substring(strIndex[0], strIndex[1]) : "";
+  return found > index ? text.substring(str_index[0], str_index[1]) : "";
+}
+
+String getSmartString() {
+  String result = smart_string;
+  result.replace("&", "%26");
+  return result;
 }
 
 
@@ -220,7 +226,7 @@ void initiatingWPS() {
 
 
 void activationTheLog() {
-  if (keepLog) {
+  if (keep_log) {
     return;
   }
 
@@ -229,7 +235,7 @@ void activationTheLog() {
     file.println();
     file.close();
   }
-  keepLog = true;
+  keep_log = true;
 
   String logs = "The log has been activated";
   server.send(200, "text/plain", logs);
@@ -237,14 +243,14 @@ void activationTheLog() {
 }
 
 void deactivationTheLog() {
-  if (!keepLog) {
+  if (!keep_log) {
     return;
   }
 
   if (LittleFS.exists("/log.txt")) {
     LittleFS.remove("/log.txt");
   }
-  keepLog = false;
+  keep_log = false;
 
   String logs = "The log has been deactivated";
   server.send(200, "text/plain", logs);
@@ -341,9 +347,9 @@ void putOfflineData(String url, String values) {
   String logs;
 
   HTTP.begin("http://" + url + "/set");
-  int httpCode = HTTP.PUT(values);
+  int http_code = HTTP.PUT(values);
 
-  if (httpCode > 0) {
+  if (http_code > 0) {
     logs = "Data transfer:\n http://" + url + "/set" + values;
   } else {
     logs = "Error sending data to " + url;
@@ -371,9 +377,9 @@ void putMultiOfflineData(String values) {
     ip = get1(devices, i);
 
     HTTP.begin("http://" + ip + "/set");
-    int httpCode = HTTP.PUT(values);
+    int http_code = HTTP.PUT(values);
 
-    if (httpCode > 0) {
+    if (http_code > 0) {
       logs += "\n http://" + ip + "/set" + values;
     } else {
       logs += "\n Error sending data to " + ip;
@@ -385,7 +391,7 @@ void putMultiOfflineData(String values) {
   note("Data transfer between devices (" + String(count) + "): " + logs + "");
 }
 
-void getOfflineData(bool log, bool allData) {
+void getOfflineData(bool log, bool all_data) {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
@@ -401,15 +407,15 @@ void getOfflineData(bool log, bool allData) {
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
-    HTTP.begin(WIFI, "http://" + ip + "/" + (allData ? "basicdata" : "priority"));
-    int httpCode = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
+    HTTP.begin(WIFI, "http://" + ip + "/" + (all_data ? "basicdata" : "priority"));
+    int http_code = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
 
     String data = HTTP.getString();
-    if (httpCode > 0 && httpCode == HTTP_CODE_OK) {
+    if (http_code > 0 && http_code == HTTP_CODE_OK) {
       logs +=  "\n " + ip + ": " + data;
       readData(data, true);
     } else {
-      logs += "\n " + ip + " - failed! " + httpCode + "/" + data;
+      logs += "\n " + ip + " - failed! " + http_code + "/" + data;
     }
 
     HTTP.end();
