@@ -48,7 +48,6 @@ void deactivationTheLog();
 void requestForLogs();
 void clearTheLog();
 void deleteWiFiSettings();
-void deleteDeviceMemory();
 int findMDNSDevices();
 void receivedOfflineData();
 void putOfflineData(String url, String values);
