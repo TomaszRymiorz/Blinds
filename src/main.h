@@ -1,7 +1,8 @@
 #include <Arduino.h>
 
 const char device[7] = "blinds";
-const int version = 14;
+const char smart_prefix = 'b';
+const int version = 15;
 
 const int light_sensor_pin = A0;
 
@@ -16,6 +17,7 @@ int steps3 = 0;
 bool reversed = false;
 bool separately = false;
 bool inverted_sequence = false;
+bool tandem = false;
 
 struct Smart {
   bool enabled;
@@ -27,6 +29,7 @@ struct Smart {
   int lifting_time;
   bool lowering_at_night_and_time;
   bool lifting_at_day_and_time;
+  bool react_to_cloudiness;
   uint32_t access;
 };
 
@@ -47,6 +50,8 @@ uint32_t sunset = 0;
 uint32_t sunrise = 0;
 bool block_twilight_counter = false;
 bool twilight = false;
+bool twilight_sensor = false;
+bool cloudiness = false;
 
 void setStepperOff();
 String toPercentages(int value, int steps);
@@ -76,7 +81,7 @@ bool hasTheLightChanged();
 void readData(String payload, bool per_wifi);
 void setSmart();
 bool automaticSettings();
-bool automaticSettings(bool twilight_changed);
+bool automaticSettings(bool light_changed);
 void prepareRotation();
 void calibration(int set, bool bypass);
 void measurementRotation();

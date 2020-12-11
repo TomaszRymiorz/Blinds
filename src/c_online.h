@@ -15,14 +15,15 @@ void activationOnlineMode();
 void deactivationOnlineMode();
 void confirmationOfPriority();
 void putOnlineData(String variant, String values);
-void putOnlineData(String variant, String values, bool logs);
+void putOnlineData(String variant, String values, bool logs, bool flawless);
 void getOnlineData();
 void readMultiOnlineData(String payload);
+
 
 void activationOnlineMode() {}
 void deactivationOnlineMode() {}
 void confirmationOfPriority() {}
 void putOnlineData(String variant, String values) {}
-void putOnlineData(String variant, String values, bool logs) {}
+void putOnlineData(String variant, String values, bool logs, bool flawless) {}
 void getOnlineData() {}
 void readMultiOnlineData(String payload) {}
