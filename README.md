@@ -15,6 +15,10 @@ Zawiera czujnik światła wykorzystywany przez funkcje automatycznych ustawień.
 
 Urządzenie posiada opcję wykonania pomiaru wysokości okna, zmianę kierunku obrotów silnika oraz możliwość kalibracji rolet. Funkcja pomiaru okna wyklucza stosowanie ograniczników krańcowych.
 
+Urządzenia mogą pracować w tandemie w celu podniesienia cięższych rolet.
+
+Rolecie można przypisać lokalizację przez co będzie ona automatycznie pobierać czasy wschodów i zachodów słońca z Internetu, stanie się niezależna od czujnika światła, który może informować tylko o zachmurzeniu. Czujnik jednak w dalszym ciągu będzie przesyłał informacje o do innych urządzeń jak robił to przed ustawieniem lokalizacji. Tworzy to możliwość podwójnego reagowania na zachodzące słońce; mamy czas pobrany z Internetu oraz wskazania czujnika światła z ustawioną granicą zmierzchu.
+
 Zegar czasu rzeczywistego wykorzystywany jest przez funkcję ustawień automatycznych.
 Ustawienia automatyczne obejmują opuszczanie i podnoszenie rolety o wybranej godzinie lub opuszczanie po zmroku / podnoszenie o świcie.
 Możliwe jest również, że roleta opuści / podniesie się dopiero po spełnieniu obydwu warunków, np. "Podnieś o świcie, ale nie wcześniej niż o 6:00".
@@ -28,6 +32,7 @@ Powtarzalność obejmuje okres jednego tygodnia, a ustawienia nie są ograniczon
 * 'd' podnieś o świcie
 * 'n&' opuść po zmroku oraz wyznaczonej godzinie (oba warunki muszą zostać spełnione)
 * 'd&' podnieś o świcie oraz wyznaczonej godzinie (oba warunki muszą zostać spełnione)
+* 'z' reaguj na zachmurzenie
 * '_' opuść o godzinie - jeśli znak występuje w zapisie, przed nim znajduje się godzina w zapisie czasu uniksowego
 * '-' podnieś o godzinie - jeśli występuje w zapisie, po nim znajduje się godzina w zapisie czasu uniksowego
 * '/' wyłącz ustawienie - obecność znaku wskazuje, że ustawienie będzie ignorowane

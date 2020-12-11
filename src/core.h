@@ -14,7 +14,7 @@ ESP8266WebServer server(80);
 HTTPClient HTTP;
 WiFiClient WIFI;
 
-// core version = 14;
+// core version = 15;
 bool offline = true;
 bool keep_log = false;
 
@@ -35,6 +35,11 @@ String smart_string = "0";
 Smart *smart_array;
 int smart_count = 0;
 
+String geo_location = "0";
+int next_sunset = -1;
+int next_sunrise = -1;
+bool also_sensors = false;
+
 bool strContains(String text, String value);
 bool hasTimeChanged();
 void note(String text);
@@ -48,6 +53,7 @@ void deactivationTheLog();
 void requestForLogs();
 void clearTheLog();
 void deleteWiFiSettings();
+void getSunriseSunset();
 int findMDNSDevices();
 void receivedOfflineData();
 void putOfflineData(String url, String values);
@@ -69,9 +75,6 @@ bool hasTimeChanged() {
 }
 
 void note(String text) {
-  if (text == "") {
-    return;
-  }
 
   String logs = strContains(text, "iDom") ? "\n[" : "[";
   if (RTC.isrunning()) {
@@ -92,6 +95,8 @@ void note(String text) {
   }
   logs += "] " + text;
 
+  Serial.print("\n" + logs);
+
   if (keep_log) {
     File file = LittleFS.open("/log.txt", "a");
     if (file) {
@@ -99,20 +104,19 @@ void note(String text) {
       file.close();
     }
   }
-
-  Serial.print("\n" + logs);
 }
 
 bool writeObjectToFile(String name, DynamicJsonDocument object) {
   name = "/" + name + ".txt";
+  bool result = false;
 
   File file = LittleFS.open(name, "w");
   if (file && object.size() > 0) {
-    bool result = serializeJson(object, file) > 2;
+    result = serializeJson(object, file) > 2;
     file.close();
-    return result;
   }
-  return false;
+
+  return result;
 }
 
 String get1(String text, int index) {
@@ -226,6 +230,7 @@ void initiatingWPS() {
 
 void activationTheLog() {
   if (keep_log) {
+    server.send(200, "text/html", "Done");
     return;
   }
 
@@ -236,13 +241,12 @@ void activationTheLog() {
   }
   keep_log = true;
 
-  String logs = "The log has been activated";
-  server.send(200, "text/plain", logs);
-  Serial.print("\n" + logs);
+  server.send(200, "text/plain", "The log has been activated");
 }
 
 void deactivationTheLog() {
   if (!keep_log) {
+    server.send(200, "text/html", "Done");
     return;
   }
 
@@ -251,9 +255,7 @@ void deactivationTheLog() {
   }
   keep_log = false;
 
-  String logs = "The log has been deactivated";
-  server.send(200, "text/plain", logs);
-  Serial.print("\n" + logs);
+  server.send(200, "text/plain", "The log has been deactivated");
 }
 
 void requestForLogs() {
@@ -263,32 +265,27 @@ void requestForLogs() {
     return;
   }
 
-  Serial.print("\nA log file was requested");
-
   server.setContentLength(file.size() + String("Log file\nHTTP/1.1 200 OK").length());
   server.send(200, "text/html", "Log file\n");
   while (file.available()) {
     server.sendContent(String(char(file.read())));
   }
   file.close();
+
   server.send(200, "text/html", "Done");
 }
 
 void clearTheLog() {
-  if (LittleFS.exists("/log.txt")) {
-    File file = LittleFS.open("/log.txt", "w");
-    if (file) {
-      file.println();
-      file.close();
-    }
-
-    String logs = "The log file was cleared";
-    server.send(200, "text/plain", logs);
-    Serial.print("\n" + logs);
+  File file = LittleFS.open("/log.txt", "w");
+  if (!file) {
+    server.send(404, "text/plain", "Failed!");
     return;
   }
 
-  server.send(404, "text/plain", "Failed!");
+  file.println();
+  file.close();
+
+  server.send(200, "text/plain", "The log file was cleared");
 }
 
 
@@ -297,11 +294,37 @@ void deleteWiFiSettings() {
   password = "";
   saveSettings();
 
-  String logs = "Wi-Fi settings have been removed";
-  server.send(200, "text/plain", logs);
-  Serial.print("\n" + logs);
+  server.send(200, "text/plain", "Wi-Fi settings have been removed");
 }
 
+
+void getSunriseSunset() {
+  if (WiFi.status() != WL_CONNECTED || geo_location.length() < 2) {
+    return;
+  }
+
+  String location = "lat=" + geo_location;
+  location.replace("x", "&lng=");
+
+  HTTP.begin(WIFI, "http://api.sunrise-sunset.org/json?" + location);
+  int http_code = HTTP.GET();
+
+  DynamicJsonDocument json_object(JSON_OBJECT_SIZE(2) + JSON_OBJECT_SIZE(10) + 340);
+  deserializeJson(json_object, HTTP.getString());
+  JsonObject object = json_object["results"];
+
+  if (!object.isNull() && http_code > 0 && object.containsKey("sunrise") && object.containsKey("sunset")) {
+    String new_value = object["sunrise"].as<String>();
+    next_sunrise = ((new_value.substring(0, new_value.indexOf(":")).toInt() + (strContains(new_value, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + new_value.substring(new_value.indexOf(":") + 1, new_value.indexOf(":") + 3).toInt();
+
+    new_value = object["sunset"].as<String>();
+    next_sunset = ((new_value.substring(0, new_value.indexOf(":")).toInt() + (strContains(new_value, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + new_value.substring(new_value.indexOf(":") + 1, new_value.indexOf(":") + 3).toInt();
+
+    note("Sunset: " + String(next_sunset) + " / Sunrise: " + String(next_sunrise));
+  }
+
+  HTTP.end();
+}
 
 int findMDNSDevices() {
   int n = MDNS.queryService("idom", "tcp");
@@ -370,13 +393,14 @@ void putMultiOfflineData(String values) {
   }
 
   String ip;
+  int http_code;
   String logs = "";
 
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
     HTTP.begin("http://" + ip + "/set");
-    int http_code = HTTP.PUT(values);
+    http_code = HTTP.PUT(values);
 
     if (http_code > 0) {
       logs += "\n http://" + ip + "/set" + values;
@@ -401,26 +425,28 @@ void getOfflineData(bool log, bool all_data) {
   }
 
   String ip;
-  String logs = "Received data...";
+  int http_code;
+  String data;
+  String logs = "";
 
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
     HTTP.begin(WIFI, "http://" + ip + "/" + (all_data ? "basicdata" : "priority"));
-    int http_code = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
+    http_code = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
 
-    String data = HTTP.getString();
+    data = HTTP.getString();
     if (http_code > 0 && http_code == HTTP_CODE_OK) {
       logs +=  "\n " + ip + ": " + data;
       readData(data, true);
     } else {
-      logs += "\n " + ip + " - failed! " + http_code + "/" + data;
+      logs += "\n " + ip + " - failed! " + http_code;
     }
 
     HTTP.end();
   }
 
   if (log) {
-    note(logs);
+    note("Received data..." + logs);
   }
 }
