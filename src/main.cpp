@@ -10,9 +10,8 @@ void setup() {
   keep_log = LittleFS.exists("/log.txt");
 
   note("iDom Blinds " + String(version));
-  Serial.print("\nDevice ID: " + WiFi.macAddress());
   offline = !LittleFS.exists("/online.txt");
-  Serial.printf("\nThe device is set to %s mode", offline ? "OFFLINE" : "ONLINE");
+  Serial.print(offline ? " OFFLINE" : " ONLINE");
 
   sprintf(host_name, "blinds_%s", String(WiFi.macAddress()).c_str());
   WiFi.hostname(host_name);
@@ -26,7 +25,6 @@ void setup() {
   if (RTC.isrunning()) {
     start_time = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
   }
-  Serial.printf("\nRTC initialization %s", start_time > 0 ? "completed" : "failed!");
 
   int new_light = analogRead(light_sensor_pin);
   if ((new_light > boundary || (sunset > 0 && sunrise > 0)) && new_light > 8) {
@@ -181,12 +179,16 @@ bool readSettings(bool backup) {
   serializeJson(json_object, logs);
   note("Reading the " + String(backup ? "backup" : "settings") + " file:\n " + logs);
 
-  saveSettings();
+  saveSettings(false);
 
   return true;
 }
 
 void saveSettings() {
+  saveSettings(true);
+}
+
+void saveSettings(bool log) {
   DynamicJsonDocument json_object(1024);
 
   json_object["ssid"] = ssid;
@@ -216,7 +218,9 @@ void saveSettings() {
   if (writeObjectToFile("settings", json_object)) {
     String logs;
     serializeJson(json_object, logs);
-    note("Saving settings:\n " + logs);
+    if (log) {
+      note("Saving settings:\n " + logs);
+    }
 
     writeObjectToFile("backup", json_object);
   } else {
@@ -290,7 +294,6 @@ void startServices() {
   server.on("/set", HTTP_PUT, receivedOfflineData);
   server.on("/state", HTTP_GET, requestForState);
   server.on("/basicdata", HTTP_POST, exchangeOfBasicData);
-  server.on("/priority", HTTP_POST, confirmationOfPriority);
   server.on("/reversed", HTTP_POST, reverseDirection);
   server.on("/measurement/start", HTTP_POST, makeMeasurement);
   server.on("/measurement/cancel", HTTP_POST, cancelMeasurement);
@@ -306,16 +309,11 @@ void startServices() {
   server.on("/admin/log", HTTP_DELETE, deactivationTheLog);
   server.on("/admin/wifisettings", HTTP_DELETE, deleteWiFiSettings);
   server.begin();
-
-  note("Launch of services. " + String(host_name) + (MDNS.begin(host_name) ? " started." : " unsuccessful!"));
+  note(String(host_name) + (MDNS.begin(host_name) ? " started" : " unsuccessful!"));
 
   MDNS.addService("idom", "tcp", 8080);
 
-  if (!offline) {
-    prime = true;
-  }
-  networked_devices = WiFi.macAddress();
-  getOfflineData(true, true);
+  getOfflineData();
 }
 
 String getBlindsDetail() {
@@ -332,11 +330,15 @@ void handshake() {
 
   String reply = "\"id\":\"" + WiFi.macAddress()
   + "\",\"value\":\"" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3)
+  + "\",\"pos\":\"" + toPercentages(actual1, steps1) + "." + toPercentages(actual2, steps2) + "." + toPercentages(actual3, steps3)
   + "\",\"light\":\"" + getSensorDetail()
   + "\",\"twilight\":" + twilight
   + ",\"cloudiness\":" + cloudiness
   + ",\"sunset\":" + (light > -1 || sunset > 0 ? sunset : 0)
   + ",\"sunrise\":" + (light > -1 || sunrise > 0 ? sunrise : 0)
+  + ",\"next_sunset\":" + next_sunset
+  + ",\"next_sunrise\":" + next_sunrise
+  + ",\"actual\":" + !next_day
   + ",\"steps\":\"" + steps1 + "." + steps2 + "." + steps3
   + "\",\"boundary\":" + boundary
   + ",\"reversed\":" + reversed
@@ -350,12 +352,10 @@ void handshake() {
   + "\",\"rtc\":" + RTC.isrunning()
   + ",\"dst\":" + dst
   + ",\"offset\":" + offset
-  + ",\"time\":" + String(RTC.now().unixtime() - offset - (dst ? 3600 : 0))
+  + ",\"time\":" + (RTC.isrunning() ? String(RTC.now().unixtime() - offset - (dst ? 3600 : 0)) : "0")
   + ",\"active\":" + String(start_time > 0 ? RTC.now().unixtime() - offset - (dst ? 3600 : 0) - start_time : 0)
   + ",\"uprisings\":" + uprisings
-  + ",\"offline\":" + offline
-  + ",\"prime\":" + prime
-  + ",\"devices\":\"" + networked_devices + "\"";
+  + ",\"offline\":" + offline;
 
   Serial.print("\nHandshake");
   server.send(200, "text/plain", "{" + reply + "}");
@@ -377,18 +377,14 @@ void requestForState() {
 void exchangeOfBasicData() {
   readData(server.arg("plain"), true);
 
-  String reply = "\"id\":\"" + String(WiFi.macAddress()) + "\"";
+  String reply = "\"offset\":" + String(offset) + ",\"dst\":" + String(dst);
 
   if (RTC.isrunning()) {
-    reply += ",\"time\":" + String(RTC.now().unixtime() - offset - (dst ? 3600 : 0)) + ",\"offset\":" + offset + ",\"dst\":" + String(dst);
+    reply += ",\"time\":" + String(RTC.now().unixtime() - offset - (dst ? 3600 : 0));
   }
 
   if (light > -1) {
     reply += (String(reply.length() > 0 ? "," : "") + "\"light\":\"" + String(light) + String(twilight_sensor ? "t" : "") + "\"");
-  }
-
-  if (!offline && prime) {
-    reply += String(reply.length() > 0 ? "," : "") + "\"prime\":" + String(prime);
   }
 
   server.send(200, "text/plain", "{" + reply + "}");
@@ -545,14 +541,14 @@ void loop() {
   if (hasTimeChanged()) {
     if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
       if (loop_time % 2 == 0) {
+        putOnlineData("detail", "pos=" + toPercentages(actual1, steps1) + "." + toPercentages(actual2, steps2) + "." + toPercentages(actual3, steps3), false, true);
+      } else {
         saveTheState();
       }
-      if (loop_time % 5 == 0) {
-        putOnlineData("detail", "pos=" + toPercentages(actual1, steps1) + "." + toPercentages(actual2, steps2) + "." + toPercentages(actual3, steps3), false, true);
+    } else {
+      if (loop_time % 2 == 0) {
+        getOnlineData();
       }
-    }
-    if (loop_time % 2 == 0) {
-      getOnlineData();
     }
     automaticSettings();
   }
@@ -560,7 +556,6 @@ void loop() {
   if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
     rotation();
     if (destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
-      Serial.print("\nRoller blind reached the target position");
       putOnlineData("detail", "pos=" + toPercentages(actual1, steps1) + "." + toPercentages(actual2, steps2) + "." + toPercentages(actual3, steps3));
       setStepperOff();
       if (LittleFS.exists("/resume.txt")) {
@@ -596,18 +591,19 @@ bool hasTheLightChanged() {
   }
 
   DateTime now = RTC.now();
-  int current_time = 0;
+  int current_time = RTC.isrunning() ? (now.hour() * 60) + now.minute() : 0;
   bool result = false;
   bool sent = false;
 
-  if (RTC.isrunning() && geo_location.length() > 2) {
-    current_time = (now.hour() * 60) + now.minute();
-
-    if ((current_time == 61 || next_sunset == -1 || next_sunrise == -1) && (offline || update_time > 0)) {
+  if (geo_location.length() > 2) {
+    if (current_time == 61 || next_day || next_sunset == -1 || next_sunrise == -1) {
+      if (current_time == 61) {
+        next_day = true;
+      }
       getSunriseSunset();
     }
 
-    if (next_sunset > -1 && next_sunrise > -1) {
+    if (RTC.isrunning() && next_sunset > -1 && next_sunrise > -1) {
       if (current_time == next_sunset && !twilight) {
         twilight = true;
         result = true;
@@ -651,14 +647,14 @@ bool hasTheLightChanged() {
 
   if (RTC.isrunning()) {
     if (twilight) {
-      if (((light > -1 && light < 100) || (geo_location.length() > 2 && (light == -1 || also_sensors) && current_time == next_sunset)) && (sunset <= sunrise || now.unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000)) {
+      if (((light > -1 && light < 100) || (light == -1 && geo_location.length() > 2 && current_time == next_sunset)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000)) { // || sunset <= sunrise // && (light == -1 || also_sensors)
         sunset = now.unixtime() - offset - (dst ? 3600 : 0);
         putOnlineData("detail", "set=" + String(sunset) + "&light=" + getSensorDetail());
         saveSettings();
         sent = true;
       }
     }
-    if ((light > 100 || (geo_location.length() > 2 && (light == -1 || also_sensors) && current_time == next_sunrise)) && (sunrise <= sunset || now.unixtime() - offset - (dst ? 3600 : 0) - sunrise > 72000)) {
+    if ((light > 100 || (light == -1 && geo_location.length() > 2 && current_time == next_sunrise)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunrise > 72000)) { // || sunrise <= sunset // && (light == -1 || also_sensors)
       if (++daybreak_counter > 9 || geo_location.length() > 2) {
         sunrise = now.unixtime() - offset - (dst ? 3600 : 0);
         putOnlineData("detail", "rise=" + String(sunrise) + "&light=" + getSensorDetail());
@@ -691,16 +687,6 @@ void readData(String payload, bool per_wifi) {
 
   if (json_object.containsKey("apk")) {
     per_wifi = true;
-  }
-
-  if (json_object.containsKey("id")) {
-    if (!strContains(networked_devices, json_object["id"].as<String>())) {
-      networked_devices +=  "," + json_object["id"].as<String>();
-    }
-  }
-
-  if (json_object.containsKey("prime")) {
-    prime = false;
   }
 
   if (json_object.containsKey("calibrate")) {
@@ -789,7 +775,7 @@ void readData(String payload, bool per_wifi) {
       destination1 = new_destination1;
       destination2 = new_destination2;
       destination3 = new_destination3;
-      prepareRotation();
+      prepareRotation(per_wifi ? (json_object.containsKey("apk") ? "apk" : "local") : "cloud");
       result += String(result.length() > 0 ? "&" : "") + "val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3);
     }
   }
@@ -870,7 +856,6 @@ void readData(String payload, bool per_wifi) {
           cloudiness = !cloudiness;
         }
       }
-
       automaticSettings(true);
     }
   }
@@ -1040,7 +1025,7 @@ bool automaticSettings(bool light_changed) {
           }
           result = true;
           log += "lifting at ";
-          log += smart_array[i].react_to_cloudiness && cloudiness ? "sunshine" : "dawn";
+          log += smart_array[i].react_to_cloudiness && !cloudiness ? "sunshine" : "dawn";
           log += smart_array[i].lifting_at_day_and_time && !twilight ? " and time" : "";
         }
       } else {
@@ -1085,7 +1070,7 @@ bool automaticSettings(bool light_changed) {
   if (result && (destination1 != actual1 || destination2 != actual2 || destination3 != actual3)) {
     note(log);
     putOnlineData("detail", "val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3));
-    prepareRotation();
+    prepareRotation("smart");
 
     return true;
   } else {
@@ -1097,7 +1082,7 @@ bool automaticSettings(bool light_changed) {
 }
 
 
-void prepareRotation() {
+void prepareRotation(String orderer) {
   String logs = "";
   if (actual1 != destination1) {
     logs = "\n 1 by " + String(destination1 - actual1) + " steps to " + toPercentages(destination1, steps1) + "%";
@@ -1108,7 +1093,7 @@ void prepareRotation() {
   if (actual3 != destination3) {
     logs += "\n 3 by " + String(destination3 - actual3) + " steps to " + toPercentages(destination3, steps3) + "%";
   }
-  note("Movement: " + logs);
+  note("Movement (" + orderer + "): " + logs);
 
   saveSettings();
   saveTheState();

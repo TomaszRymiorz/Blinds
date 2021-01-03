@@ -14,7 +14,7 @@ ESP8266WebServer server(80);
 HTTPClient HTTP;
 WiFiClient WIFI;
 
-// core version = 15;
+// core version = 16;
 bool offline = true;
 bool keep_log = false;
 
@@ -38,6 +38,7 @@ int smart_count = 0;
 String geo_location = "0";
 int next_sunset = -1;
 int next_sunrise = -1;
+bool next_day = true;
 bool also_sensors = false;
 
 bool strContains(String text, String value);
@@ -56,9 +57,9 @@ void deleteWiFiSettings();
 void getSunriseSunset();
 int findMDNSDevices();
 void receivedOfflineData();
-void putOfflineData(String url, String values);
-void putMultiOfflineData(String values);
-void getOfflineData(bool log, bool all_data);
+void putOfflineData(String url, String data);
+void putMultiOfflineData(String data);
+void getOfflineData();
 
 
 bool strContains(String text, String value) {
@@ -306,21 +307,25 @@ void getSunriseSunset() {
   String location = "lat=" + geo_location;
   location.replace("x", "&lng=");
 
-  HTTP.begin(WIFI, "http://api.sunrise-sunset.org/json?" + location);
+  HTTP.begin("http://api.sunrise-sunset.org/json?" + location);
+  HTTP.addHeader("Content-Type", "text/plain");
   int http_code = HTTP.GET();
 
-  DynamicJsonDocument json_object(JSON_OBJECT_SIZE(2) + JSON_OBJECT_SIZE(10) + 340);
-  deserializeJson(json_object, HTTP.getString());
-  JsonObject object = json_object["results"];
+  if (http_code == HTTP_CODE_OK) {
+    DynamicJsonDocument json_object(1024);
+    deserializeJson(json_object, HTTP.getString());
+    JsonObject object = json_object["results"];
 
-  if (!object.isNull() && http_code > 0 && object.containsKey("sunrise") && object.containsKey("sunset")) {
-    String new_value = object["sunrise"].as<String>();
-    next_sunrise = ((new_value.substring(0, new_value.indexOf(":")).toInt() + (strContains(new_value, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + new_value.substring(new_value.indexOf(":") + 1, new_value.indexOf(":") + 3).toInt();
+    if (object.containsKey("sunrise") && object.containsKey("sunset")) {
+      String data = object["sunrise"].as<String>();
+      next_sunrise = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
 
-    new_value = object["sunset"].as<String>();
-    next_sunset = ((new_value.substring(0, new_value.indexOf(":")).toInt() + (strContains(new_value, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + new_value.substring(new_value.indexOf(":") + 1, new_value.indexOf(":") + 3).toInt();
+      data = object["sunset"].as<String>();
+      next_sunset = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
 
-    note("Sunset: " + String(next_sunset) + " / Sunrise: " + String(next_sunrise));
+      next_day = false;
+      note("Sunset: " + String(next_sunset) + " / Sunrise: " + String(next_sunrise));
+    }
   }
 
   HTTP.end();
@@ -329,6 +334,7 @@ void getSunriseSunset() {
 int findMDNSDevices() {
   int n = MDNS.queryService("idom", "tcp");
   String ip;
+
   if (n > 0) {
     for (int i = 0; i < n; ++i) {
       ip = String(MDNS.IP(i)[0]) + '.' + String(MDNS.IP(i)[1]) + '.' + String(MDNS.IP(i)[2]) + '.' + String(MDNS.IP(i)[3]);
@@ -361,28 +367,28 @@ void receivedOfflineData() {
   server.send(200, "text/plain", "Body not received");
 }
 
-void putOfflineData(String url, String values) {
+void putOfflineData(String url, String data) {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
 
   String logs;
 
-  HTTP.begin("http://" + url + "/set");
-  int http_code = HTTP.PUT(values);
+  HTTP.begin(WIFI, "http://" + url + "/set");
+  int http_code = HTTP.PUT(data);
 
-  if (http_code > 0) {
-    logs = "Data transfer:\n http://" + url + "/set" + values;
+  if (http_code == HTTP_CODE_OK) {
+    logs = url + ": " + data;
   } else {
-    logs = "Error sending data to " + url;
+    logs = url + " - error "  + http_code;
   }
 
   HTTP.end();
 
-  note(logs);
+  note("Data transfer to:\n" + logs);
 }
 
-void putMultiOfflineData(String values) {
+void putMultiOfflineData(String data) {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
@@ -399,22 +405,22 @@ void putMultiOfflineData(String values) {
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
-    HTTP.begin("http://" + ip + "/set");
-    http_code = HTTP.PUT(values);
+    HTTP.begin(WIFI, "http://" + ip + "/set");
+    http_code = HTTP.PUT(data);
 
-    if (http_code > 0) {
-      logs += "\n http://" + ip + "/set" + values;
+    if (http_code == HTTP_CODE_OK) {
+      logs += "\n " + ip + ": " + data;
     } else {
-      logs += "\n Error sending data to " + ip;
+      logs += "\n " + ip + " - error "  + http_code;
     }
 
     HTTP.end();
   }
 
-  note("Data transfer between devices (" + String(count) + "): " + logs + "");
+  note("Data transfer to " + String(count) + ":" + logs);
 }
 
-void getOfflineData(bool log, bool all_data) {
+void getOfflineData() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
@@ -432,21 +438,21 @@ void getOfflineData(bool log, bool all_data) {
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
-    HTTP.begin(WIFI, "http://" + ip + "/" + (all_data ? "basicdata" : "priority"));
+    HTTP.begin(WIFI, "http://" + ip + "/basicdata");
     http_code = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
 
-    data = HTTP.getString();
-    if (http_code > 0 && http_code == HTTP_CODE_OK) {
-      logs +=  "\n " + ip + ": " + data;
-      readData(data, true);
+    if (http_code == HTTP_CODE_OK) {
+      if (HTTP.getSize() > 0) {
+        data = HTTP.getString();
+        logs +=  "\n " + ip + ": " + data;
+        readData(data, true);
+      }
     } else {
-      logs += "\n " + ip + " - failed! " + http_code;
+      logs += "\n " + ip + " - error " + http_code;
     }
 
     HTTP.end();
   }
 
-  if (log) {
-    note("Received data..." + logs);
-  }
+  note("Received data..." + logs);
 }

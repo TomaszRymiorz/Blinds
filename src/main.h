@@ -2,7 +2,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 15;
+const int version = 16;
 
 const int light_sensor_pin = A0;
 
@@ -58,6 +58,7 @@ String toPercentages(int value, int steps);
 int toSteps(int value, int steps);
 bool readSettings(bool backup);
 void saveSettings();
+void saveSettings(bool log);
 void resume();
 void saveTheState();
 void sayHelloToTheServer();
@@ -82,7 +83,7 @@ void readData(String payload, bool per_wifi);
 void setSmart();
 bool automaticSettings();
 bool automaticSettings(bool light_changed);
-void prepareRotation();
+void prepareRotation(String orderer);
 void calibration(int set, bool bypass);
 void measurementRotation();
 void rotation();
