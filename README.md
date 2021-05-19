@@ -50,8 +50,6 @@ Sterowanie urządzeniem odbywa się poprzez wykorzystanie metod dostępnych w pr
 
 * "/state" - Służy do regularnego odpytywania urządzenia o jego podstawowe stany, położenie rolety i wskazania czujnika oświetlenia.
 
-* "/reversed" - Odpytanie tego adresu zmienia kierunek obracania się silnika rolety.
-
 * "/reset" - Ustawia wartość pozycji rolet na 0.
 
 * "/measurement" - Służy do wykonania pomiaru wysokości okna.
@@ -59,5 +57,3 @@ Sterowanie urządzeniem odbywa się poprzez wykorzystanie metod dostępnych w pr
 * "/basicdata" - Służy innym urządzeniom systemu iDom do samokontroli, urządzenia po uruchomieniu odpytują się wzajemnie o aktualny czas lub dane z czujników.
 
 * "/log" - Pod tym adresem znajduje się dziennik aktywności urządzenia (domyślnie wyłączony).
-
-* "/wifisettings" - Ten adres służy do usunięcia danych dostępowych do routera.
