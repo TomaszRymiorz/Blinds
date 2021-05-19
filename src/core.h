@@ -7,14 +7,17 @@
 #include <ESP8266HTTPClient.h>
 #include <ESP8266mDNS.h>
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
 #include "main.h"
 
 RTC_DS1307 RTC;
+// RTC_Millis RTC;
+
 ESP8266WebServer server(80);
 HTTPClient HTTP;
 WiFiClient WIFI;
 
-// core version = 16;
+// core version = 18;
 bool offline = true;
 bool keep_log = false;
 
@@ -36,12 +39,17 @@ Smart *smart_array;
 int smart_count = 0;
 
 String geo_location = "0";
+int last_sun_check = -1;
 int next_sunset = -1;
 int next_sunrise = -1;
-bool next_day = true;
 bool also_sensors = false;
 
+int dusk_delay = 0;
+int dawn_delay = 0;
+
 bool strContains(String text, String value);
+bool strContains(int text, String value);
+bool RTCisrunning();
 bool hasTimeChanged();
 void note(String text);
 bool writeObjectToFile(String name, DynamicJsonDocument object);
@@ -53,21 +61,30 @@ void activationTheLog();
 void deactivationTheLog();
 void requestForLogs();
 void clearTheLog();
-void deleteWiFiSettings();
-void getSunriseSunset();
+void getSunriseSunset(int day);
 int findMDNSDevices();
 void receivedOfflineData();
 void putOfflineData(String url, String data);
 void putMultiOfflineData(String data);
 void getOfflineData();
+void setupOTA();
 
 
 bool strContains(String text, String value) {
   return text.indexOf(value) > -1;
 }
 
+bool strContains(int text, String value) {
+  return String(text).indexOf(value) > -1;
+}
+
+bool RTCisrunning() {
+  // return RTC.now().unixtime() > 1546304461;
+  return RTC.isrunning();
+}
+
 bool hasTimeChanged() {
-  uint32_t current_time = RTC.isrunning() ? RTC.now().unixtime() : millis() / 1000;
+  uint32_t current_time = RTCisrunning() ? RTC.now().unixtime() : millis() / 1000;
   if (abs(current_time - loop_time) >= 1) {
     loop_time = current_time;
     return true;
@@ -78,7 +95,7 @@ bool hasTimeChanged() {
 void note(String text) {
 
   String logs = strContains(text, "iDom") ? "\n[" : "[";
-  if (RTC.isrunning()) {
+  if (RTCisrunning()) {
     DateTime now = RTC.now();
     logs += now.day();
     logs += ".";
@@ -290,16 +307,7 @@ void clearTheLog() {
 }
 
 
-void deleteWiFiSettings() {
-  ssid = "";
-  password = "";
-  saveSettings();
-
-  server.send(200, "text/plain", "Wi-Fi settings have been removed");
-}
-
-
-void getSunriseSunset() {
+void getSunriseSunset(int day) {
   if (WiFi.status() != WL_CONNECTED || geo_location.length() < 2) {
     return;
   }
@@ -309,9 +317,8 @@ void getSunriseSunset() {
 
   HTTP.begin("http://api.sunrise-sunset.org/json?" + location);
   HTTP.addHeader("Content-Type", "text/plain");
-  int http_code = HTTP.GET();
 
-  if (http_code == HTTP_CODE_OK) {
+  if (HTTP.GET() == HTTP_CODE_OK) {
     DynamicJsonDocument json_object(1024);
     deserializeJson(json_object, HTTP.getString());
     JsonObject object = json_object["results"];
@@ -319,11 +326,13 @@ void getSunriseSunset() {
     if (object.containsKey("sunrise") && object.containsKey("sunset")) {
       String data = object["sunrise"].as<String>();
       next_sunrise = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
+      next_sunrise += dawn_delay;
 
       data = object["sunset"].as<String>();
       next_sunset = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
+      next_sunset += dusk_delay;
 
-      next_day = false;
+      last_sun_check = day;
       note("Sunset: " + String(next_sunset) + " / Sunrise: " + String(next_sunrise));
     }
   }
@@ -442,17 +451,43 @@ void getOfflineData() {
     http_code = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
 
     if (http_code == HTTP_CODE_OK) {
-      if (HTTP.getSize() > 0) {
+      if (HTTP.getSize() > 15) {
         data = HTTP.getString();
         logs +=  "\n " + ip + ": " + data;
         readData(data, true);
       }
     } else {
-      logs += "\n " + ip + " - error " + http_code;
+      logs += "\n " + ip + ": error " + http_code;
     }
 
     HTTP.end();
   }
 
   note("Received data..." + logs);
+}
+
+void setupOTA() {
+  ArduinoOTA.setHostname(host_name);
+
+  ArduinoOTA.onEnd([]() {
+    note("Software update over Wi-Fi");
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    String log = "OTA ";
+    if (error == OTA_AUTH_ERROR) {
+      log += "Auth";
+    } else if (error == OTA_BEGIN_ERROR) {
+      log += "Begin";
+    } else if (error == OTA_CONNECT_ERROR) {
+      log += "Connect";
+    } else if (error == OTA_RECEIVE_ERROR) {
+      log += "Receive";
+    } else if (error == OTA_END_ERROR) {
+      log += "End";
+    }
+    note(log + String(" failed!"));
+  });
+
+  ArduinoOTA.begin();
 }

@@ -9,7 +9,7 @@ void setup() {
 
   keep_log = LittleFS.exists("/log.txt");
 
-  note("iDom Blinds " + String(version));
+  note("iDom Blinds ." + String(version));
   offline = !LittleFS.exists("/online.txt");
   Serial.print(offline ? " OFFLINE" : " ONLINE");
 
@@ -39,6 +39,7 @@ void setup() {
   pinMode(bipolar_direction_pin, OUTPUT);
   pinMode(bipolar_step_pin, OUTPUT);
   setStepperOff();
+  setupOTA();
 
   if (ssid != "" && password != "") {
     connectingToWifi();
@@ -74,12 +75,16 @@ bool readSettings(bool backup) {
 
   DynamicJsonDocument json_object(1024);
   deserializeJson(json_object, file.readString());
-  file.close();
 
   if (json_object.isNull() || json_object.size() < 5) {
     note(String(backup ? "Backup" : "Settings") + " file error");
+    file.close();
     return false;
   }
+
+  file.seek(0);
+  note("Reading the " + String(backup ? "backup" : "settings") + " file:\n " + file.readString());
+  file.close();
 
   if (json_object.containsKey("ssid")) {
     ssid = json_object["ssid"].as<String>();
@@ -175,10 +180,6 @@ bool readSettings(bool backup) {
     actual3 = destination3;
   }
 
-  String logs;
-  serializeJson(json_object, logs);
-  note("Reading the " + String(backup ? "backup" : "settings") + " file:\n " + logs);
-
   saveSettings(false);
 
   return true;
@@ -216,9 +217,9 @@ void saveSettings(bool log) {
   json_object["destination3"] = destination3;
 
   if (writeObjectToFile("settings", json_object)) {
-    String logs;
-    serializeJson(json_object, logs);
     if (log) {
+      String logs;
+      serializeJson(json_object, logs);
       note("Saving settings:\n " + logs);
     }
 
@@ -238,34 +239,35 @@ void resume() {
   deserializeJson(json_object, file.readString());
   file.close();
 
-  if (!json_object.isNull() && json_object.size() > 0) {
+  if (json_object.isNull() || json_object.size() < 1) {
+    return;
+  }
+
+  if (json_object.containsKey("1")) {
+    actual1 = json_object["1"].as<int>();
+  }
+  if (json_object.containsKey("2")) {
+    actual2 = json_object["2"].as<int>();
+  }
+  if (json_object.containsKey("3")) {
+    actual3 = json_object["3"].as<int>();
+  }
+
+  if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
     String logs = "";
-
-    if (json_object.containsKey("1")) {
-      actual1 = json_object["1"].as<int>();
-      if (actual1 != destination1) {
-        logs = "\n1 to " + String(destination1 - actual1) + " steps to " + toPercentages(destination1, steps1) + "%";
-      }
+    if (destination1 != actual1) {
+      logs += "\n1 to " + String(destination1 - actual1) + " steps to " + toPercentages(destination1, steps1) + "%";
     }
-    if (json_object.containsKey("2")) {
-      actual2 = json_object["2"].as<int>();
-      if (actual2 != destination2) {
-        logs += "\n2 to " + String(destination2 - actual2) + " steps to " + toPercentages(destination2, steps2) + "%";
-      }
+    if (destination2 != actual2) {
+      logs += "\n2 to " + String(destination2 - actual2) + " steps to " + toPercentages(destination2, steps2) + "%";
     }
-    if (json_object.containsKey("3")) {
-      actual3 = json_object["3"].as<int>();
-      if (actual3 != destination3) {
-        logs += "\n3 to " + String(destination3 - actual3) + " steps to " + toPercentages(destination3, steps3) + "%";
-      }
+    if (destination3 != actual3) {
+      logs += "\n3 to " + String(destination3 - actual3) + " steps to " + toPercentages(destination3, steps3) + "%";
     }
-
-    if (actual1 != destination1 || actual2 != destination2 || actual3 != destination3) {
-      note("Resume: " + logs);
-    } else {
-      if (LittleFS.exists("/resume.txt")) {
-        LittleFS.remove("/resume.txt");
-      }
+    note("Resume: " + logs);
+  } else {
+    if (LittleFS.exists("/resume.txt")) {
+      LittleFS.remove("/resume.txt");
     }
   }
 }
@@ -294,12 +296,12 @@ void startServices() {
   server.on("/set", HTTP_PUT, receivedOfflineData);
   server.on("/state", HTTP_GET, requestForState);
   server.on("/basicdata", HTTP_POST, exchangeOfBasicData);
-  server.on("/reversed", HTTP_POST, reverseDirection);
   server.on("/measurement/start", HTTP_POST, makeMeasurement);
   server.on("/measurement/cancel", HTTP_POST, cancelMeasurement);
   server.on("/measurement/end", HTTP_POST, endMeasurement);
   server.on("/log", HTTP_GET, requestForLogs);
   server.on("/log", HTTP_DELETE, clearTheLog);
+  server.on("/admin/update", HTTP_POST, manualUpdate);
   server.on("/admin/reset", HTTP_POST, setMin);
   server.on("/admin/setmax", HTTP_POST, setMax);
   server.on("/admin/setasmax", HTTP_POST, setAsMax);
@@ -307,16 +309,27 @@ void startServices() {
   server.on("/admin/sensor", HTTP_DELETE, deactivateTheLightSensor);
   server.on("/admin/log", HTTP_POST, activationTheLog);
   server.on("/admin/log", HTTP_DELETE, deactivationTheLog);
-  server.on("/admin/wifisettings", HTTP_DELETE, deleteWiFiSettings);
   server.begin();
+
   note(String(host_name) + (MDNS.begin(host_name) ? " started" : " unsuccessful!"));
 
   MDNS.addService("idom", "tcp", 8080);
 
+  getTime();
   getOfflineData();
 }
 
 String getBlindsDetail() {
+  return "";
+  // This function is only available with a ready-made iDom device.
+}
+
+String getValue() {
+  return "";
+  // This function is only available with a ready-made iDom device.
+}
+
+String getBlindsPosition() {
   return "";
   // This function is only available with a ready-made iDom device.
 }
@@ -326,7 +339,9 @@ String getSensorDetail() {
 }
 
 void handshake() {
-  readData(server.arg("plain"), true);
+  if (server.hasArg("plain")) {
+    readData(server.arg("plain"), true);
+  }
 
   String reply = "\"id\":\"" + WiFi.macAddress()
   + "\",\"value\":\"" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3)
@@ -338,7 +353,7 @@ void handshake() {
   + ",\"sunrise\":" + (light > -1 || sunrise > 0 ? sunrise : 0)
   + ",\"next_sunset\":" + next_sunset
   + ",\"next_sunrise\":" + next_sunrise
-  + ",\"actual\":" + !next_day
+  + ",\"sun_check\":" + last_sun_check
   + ",\"steps\":\"" + steps1 + "." + steps2 + "." + steps3
   + "\",\"boundary\":" + boundary
   + ",\"reversed\":" + reversed
@@ -375,7 +390,9 @@ void requestForState() {
 }
 
 void exchangeOfBasicData() {
-  readData(server.arg("plain"), true);
+  if (server.hasArg("plain")) {
+    readData(server.arg("plain"), true);
+  }
 
   String reply = "\"offset\":" + String(offset) + ",\"dst\":" + String(dst);
 
@@ -390,14 +407,6 @@ void exchangeOfBasicData() {
   server.send(200, "text/plain", "{" + reply + "}");
 }
 
-void reverseDirection() {
-  reversed = !reversed;
-  note("Engine set in the " + String(reversed ? "opposite" : "right") +  " direction");
-  saveSettings();
-  server.send(200, "text/plain", "Done");
-  sayHelloToTheServer();
-}
-
 void setMin() {
   destination1 = 0;
   destination2 = 0;
@@ -405,9 +414,10 @@ void setMin() {
   actual1 = 0;
   actual2 = 0;
   actual3 = 0;
+
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putOnlineData("detail", "val=0.0.0");
+  putOnlineData("val=0.0.0&pos=0.0.0");
 }
 
 void setMax() {
@@ -417,9 +427,10 @@ void setMax() {
   actual1 = steps1;
   actual2 = steps2;
   actual3 = steps3;
+
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putOnlineData("detail", "val=100.100.100");
+  putOnlineData("val=100.100.100&pos=100.100.100");
 }
 
 void setAsMax() {
@@ -429,9 +440,10 @@ void setAsMax() {
   destination1 = actual1;
   destination2 = actual2;
   destination3 = actual3;
+
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putOnlineData("detail", "val=100.100.100");
+  putOnlineData("val=100.100.100&pos=100.100.100");
 }
 
 void makeMeasurement() {
@@ -439,23 +451,19 @@ void makeMeasurement() {
     return;
   }
 
-  DynamicJsonDocument json_object(1024);
-  deserializeJson(json_object, server.arg("plain"));
+  wings = 123;
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument json_object(1024);
+    deserializeJson(json_object, server.arg("plain"));
 
-  if (json_object.isNull()) {
-    server.send(200, "text/plain", "Body not received");
-    return;
+    if (!json_object.isNull() && json_object.containsKey("wings")) {
+      wings = json_object["wings"].as<int>();
+    }
   }
 
-  if (json_object.containsKey("wings")) {
-    wings = json_object["wings"].as<int>();
-  } else {
-    wings = 123;
-  }
-
-  if ((strContains(String(wings), "1") && !(destination1 == 0 || actual1 == 0))
-  || (strContains(String(wings), "2") && !(destination2 == 0 || actual2 == 0))
-  || (strContains(String(wings), "3") && !(destination3 == 0 || actual3 == 0))) {
+  if ((strContains(wings, "1") && !(destination1 == 0 || actual1 == 0))
+  || (strContains(wings, "2") && !(destination2 == 0 || actual2 == 0))
+  || (strContains(wings, "3") && !(destination3 == 0 || actual3 == 0))) {
     server.send(200, "text/plain", "Cannot execute");
     return;
   }
@@ -485,21 +493,21 @@ void endMeasurement() {
   measurement = false;
   setStepperOff();
 
-  if (strContains(String(wings), "1")) {
+  if (strContains(wings, "1")) {
     steps1 = actual1;
     destination1 = actual1;
   }
-  if (strContains(String(wings), "2")) {
+  if (strContains(wings, "2")) {
     steps2 = actual2;
     destination2 = actual2;
   }
-  if (strContains(String(wings), "3")) {
+  if (strContains(wings, "3")) {
     steps3 = actual3;
     destination3 = actual3;
   }
   note("Measurement completed");
   saveSettings();
-  sayHelloToTheServer();
+  putOnlineData("val=" + getValue() + "&pos=" + getBlindsPosition() + "&detail=" + getBlindsDetail());
 
   server.send(200, "text/plain", "Done");
 }
@@ -530,6 +538,9 @@ void loop() {
     cancelMeasurement();
   }
 
+  if (destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
+    ArduinoOTA.handle();
+  }
   server.handleClient();
   MDNS.update();
 
@@ -541,14 +552,12 @@ void loop() {
   if (hasTimeChanged()) {
     if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
       if (loop_time % 2 == 0) {
-        putOnlineData("detail", "pos=" + toPercentages(actual1, steps1) + "." + toPercentages(actual2, steps2) + "." + toPercentages(actual3, steps3), false, true);
+        putOnlineData("pos=" + getBlindsPosition() + (sending_error ? "&val=" + getValue() : ""), false, true);
       } else {
         saveTheState();
       }
     } else {
-      if (loop_time % 2 == 0) {
-        getOnlineData();
-      }
+      getOnlineData();
     }
     automaticSettings();
   }
@@ -556,7 +565,7 @@ void loop() {
   if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
     rotation();
     if (destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
-      putOnlineData("detail", "pos=" + toPercentages(actual1, steps1) + "." + toPercentages(actual2, steps2) + "." + toPercentages(actual3, steps3));
+      putOnlineData("pos=" + getBlindsPosition());
       setStepperOff();
       if (LittleFS.exists("/resume.txt")) {
         LittleFS.remove("/resume.txt");
@@ -596,11 +605,8 @@ bool hasTheLightChanged() {
   bool sent = false;
 
   if (geo_location.length() > 2) {
-    if (current_time == 61 || next_day || next_sunset == -1 || next_sunrise == -1) {
-      if (current_time == 61) {
-        next_day = true;
-      }
-      getSunriseSunset();
+    if ((current_time > 51 && last_sun_check != now.day()) || next_sunset == -1 || next_sunrise == -1) {
+      getSunriseSunset(now.day());
     }
 
     if (RTC.isrunning() && next_sunset > -1 && next_sunrise > -1) {
@@ -649,16 +655,20 @@ bool hasTheLightChanged() {
     if (twilight) {
       if (((light > -1 && light < 100) || (light == -1 && geo_location.length() > 2 && current_time == next_sunset)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000)) { // || sunset <= sunrise // && (light == -1 || also_sensors)
         sunset = now.unixtime() - offset - (dst ? 3600 : 0);
-        putOnlineData("detail", "set=" + String(sunset) + "&light=" + getSensorDetail());
-        saveSettings();
+        putOnlineData("set=" + String(sunset) + "&light=" + getSensorDetail());
+        if (!result) {
+          saveSettings();
+        }
         sent = true;
       }
     }
     if ((light > 100 || (light == -1 && geo_location.length() > 2 && current_time == next_sunrise)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunrise > 72000)) { // || sunrise <= sunset // && (light == -1 || also_sensors)
       if (++daybreak_counter > 9 || geo_location.length() > 2) {
         sunrise = now.unixtime() - offset - (dst ? 3600 : 0);
-        putOnlineData("detail", "rise=" + String(sunrise) + "&light=" + getSensorDetail());
-        saveSettings();
+        putOnlineData("rise=" + String(sunrise) + "&light=" + getSensorDetail());
+        if (!result) {
+          saveSettings();
+        }
         sent = true;
         daybreak_counter = 0;
       }
@@ -668,7 +678,7 @@ bool hasTheLightChanged() {
   }
 
   if (!sent && change) {
-    putOnlineData("detail", "light=" + getSensorDetail(), false, false);
+    putOnlineData("light=" + getSensorDetail(), false, false);
   }
 
   return result;
@@ -683,10 +693,6 @@ void readData(String payload, bool per_wifi) {
       note("Parsing failed!");
     }
     return;
-  }
-
-  if (json_object.containsKey("apk")) {
-    per_wifi = true;
   }
 
   if (json_object.containsKey("calibrate")) {
@@ -740,15 +746,9 @@ void readData(String payload, bool per_wifi) {
         note("Adjust time");
         start_time = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
         if (RTC.isrunning()) {
-          sayHelloToTheServer();
+          details_change = true;
         }
       }
-    }
-  }
-
-  if (json_object.containsKey("up")) {
-    if (update_time < json_object["up"].as<uint32_t>()) {
-      update_time = json_object["up"].as<uint32_t>();
     }
   }
 
@@ -756,27 +756,32 @@ void readData(String payload, bool per_wifi) {
     if (smart_string != json_object["smart"].as<String>()) {
       smart_string = json_object["smart"].as<String>();
       setSmart();
-      result = "smart=" + getSmartString();
+      if (per_wifi) {
+        result += String(result.length() > 0 ? "&" : "") + "smart=" + getSmartString();
+      }
       settings_change = true;
     }
   }
 
   if (json_object.containsKey("val")) {
     String new_value = json_object["val"].as<String>();
-    int new_destination1 = steps1 > 0 ? toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1) : destination1;
-    int new_destination2 = destination2;
-    int new_destination3 = destination3;
+    if (steps1 > 0) {
+      destination1 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1);
+    }
 
     new_value = new_value.substring(new_value.indexOf(".") + 1);
-    new_destination2 = steps2 > 0 ? toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2) : destination2;
-    new_destination3 = steps3 > 0 ? toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3) : destination3;
+    if (steps2 > 0) {
+      destination2 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2);
+    }
+    if (steps3 > 0) {
+      destination3 = toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3);
+    }
 
-    if (destination1 != new_destination1 || destination2 != new_destination2 || destination3 != new_destination3) {
-      destination1 = new_destination1;
-      destination2 = new_destination2;
-      destination3 = new_destination3;
+    if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
       prepareRotation(per_wifi ? (json_object.containsKey("apk") ? "apk" : "local") : "cloud");
-      result += String(result.length() > 0 ? "&" : "") + "val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3);
+      if (per_wifi) {
+        result += String(result.length() > 0 ? "&" : "") + "val=" + getValue();
+      }
     }
   }
 
@@ -797,6 +802,13 @@ void readData(String payload, bool per_wifi) {
   if (json_object.containsKey("steps3") && actual3 == 0) {
     if (steps3 != json_object["steps3"].as<int>()) {
       steps3 = json_object["steps3"].as<int>();
+      details_change = true;
+    }
+  }
+
+  if (json_object.containsKey("reversed")) {
+    if (reversed != strContains(json_object["reversed"].as<String>(), "1")) {
+      reversed = !reversed;
       details_change = true;
     }
   }
@@ -832,7 +844,7 @@ void readData(String payload, bool per_wifi) {
   if (json_object.containsKey("location")) {
     if (geo_location != json_object["location"].as<String>()) {
       geo_location = json_object["location"].as<String>();
-      getSunriseSunset();
+      getSunriseSunset(RTC.now().day());
       details_change = true;
     }
   }
@@ -864,11 +876,11 @@ void readData(String payload, bool per_wifi) {
     note("Received the data:\n " + payload);
     saveSettings();
   }
-  if (per_wifi && (result.length() > 0 || details_change)) {
+  if (!offline && (result.length() > 0 || details_change)) {
     if (details_change) {
       result += String(result.length() > 0 ? "&" : "") + "detail=" + getBlindsDetail();
     }
-    putOnlineData("detail", result);
+    putOnlineData(result);
   }
 }
 
@@ -895,7 +907,6 @@ void setSmart() {
   smart_array = new Smart[smart_count];
   smart_count = 0;
 
-  Smart new_smart;
   String single_smart_string;
 
   for (int i = 0; i < count; i++) {
@@ -903,57 +914,57 @@ void setSmart() {
     if (strContains(single_smart_string, String(smart_prefix))) {
 
       if (strContains(single_smart_string, "/")) {
-        new_smart.enabled = false;
+        smart_array[smart_count].enabled = false;
         single_smart_string = single_smart_string.substring(1);
       } else {
-        new_smart.enabled = true;
+        smart_array[smart_count].enabled = true;
       }
 
       if (strContains(single_smart_string, "_")) {
-        new_smart.lowering_time = single_smart_string.substring(0, single_smart_string.indexOf("_")).toInt();
+        smart_array[smart_count].lowering_time = single_smart_string.substring(0, single_smart_string.indexOf("_")).toInt();
         single_smart_string = single_smart_string.substring(single_smart_string.indexOf("_") + 1);
       } else {
-        new_smart.lowering_time = -1;
+        smart_array[smart_count].lowering_time = -1;
       }
 
       if (strContains(single_smart_string, "-")) {
-        new_smart.lifting_time = single_smart_string.substring(single_smart_string.indexOf("-") + 1).toInt();
+        smart_array[smart_count].lifting_time = single_smart_string.substring(single_smart_string.indexOf("-") + 1).toInt();
         single_smart_string = single_smart_string.substring(0, single_smart_string.indexOf("-"));
       } else {
-        new_smart.lifting_time = -1;
+        smart_array[smart_count].lifting_time = -1;
       }
 
       if (strContains(single_smart_string, "4")) {
-        new_smart.wing = "123";
+        smart_array[smart_count].wing = "123";
       } else {
-        new_smart.wing = strContains(single_smart_string, "1") ? "1" : "";
-        new_smart.wing += strContains(single_smart_string, "2") ? "2" : "";
-        new_smart.wing += strContains(single_smart_string, "3") ? "3" : "";
-        if (new_smart.wing == "") {
-          new_smart.wing = "123";
+        smart_array[smart_count].wing = strContains(single_smart_string, "1") ? "1" : "";
+        smart_array[smart_count].wing += strContains(single_smart_string, "2") ? "2" : "";
+        smart_array[smart_count].wing += strContains(single_smart_string, "3") ? "3" : "";
+        if (smart_array[smart_count].wing == "") {
+          smart_array[smart_count].wing = "123";
         }
       }
 
       if (strContains(single_smart_string, "w")) {
-        new_smart.days = "w";
+        smart_array[smart_count].days = "w";
       } else {
-        new_smart.days = strContains(single_smart_string, "o") ? "o" : "";
-        new_smart.days += strContains(single_smart_string, "u") ? "u" : "";
-        new_smart.days += strContains(single_smart_string, "e") ? "e" : "";
-        new_smart.days += strContains(single_smart_string, "h") ? "h" : "";
-        new_smart.days += strContains(single_smart_string, "r") ? "r" : "";
-        new_smart.days += strContains(single_smart_string, "a") ? "a" : "";
-        new_smart.days += strContains(single_smart_string, "s") ? "s" : "";
+        smart_array[smart_count].days = strContains(single_smart_string, "o") ? "o" : "";
+        smart_array[smart_count].days += strContains(single_smart_string, "u") ? "u" : "";
+        smart_array[smart_count].days += strContains(single_smart_string, "e") ? "e" : "";
+        smart_array[smart_count].days += strContains(single_smart_string, "h") ? "h" : "";
+        smart_array[smart_count].days += strContains(single_smart_string, "r") ? "r" : "";
+        smart_array[smart_count].days += strContains(single_smart_string, "a") ? "a" : "";
+        smart_array[smart_count].days += strContains(single_smart_string, "s") ? "s" : "";
       }
 
-      new_smart.lowering_at_night = strContains(single_smart_string, "n");
-      new_smart.lifting_at_day = strContains(single_smart_string, "d");
-      new_smart.lowering_at_night_and_time = strContains(single_smart_string, "n&");
-      new_smart.lifting_at_day_and_time = strContains(single_smart_string, "d&");
-      new_smart.react_to_cloudiness = strContains(single_smart_string, "z");
-      new_smart.access = 0;
+      smart_array[smart_count].lowering_at_night = strContains(single_smart_string, "n");
+      smart_array[smart_count].lifting_at_day = strContains(single_smart_string, "d");
+      smart_array[smart_count].lowering_at_night_and_time = strContains(single_smart_string, "n&");
+      smart_array[smart_count].lifting_at_day_and_time = strContains(single_smart_string, "d&");
+      smart_array[smart_count].react_to_cloudiness = strContains(single_smart_string, "z");
+      smart_array[smart_count].access = 0;
 
-      smart_array[smart_count++] = new_smart;
+      smart_count++;
     }
   }
   note("Smart contains " + String(smart_count) + " of " + String(smart_prefix));
@@ -974,19 +985,25 @@ bool automaticSettings(bool light_changed) {
 
     if (current_time == 120 || current_time == 180) {
       if (now.month() == 3 && now.day() > 24 && days_of_the_week[now.dayOfTheWeek()][0] == 's' && current_time == 120 && !dst) {
-        int new_time = RTC.now().unixtime() + 3600;
+        int new_time = now.unixtime() + 3600;
         RTC.adjust(DateTime(new_time));
         dst = true;
-        saveSettings();
         note("Smart set to summer time");
+        saveSettings();
+        getSunriseSunset(now.day());
       }
       if (now.month() == 10 && now.day() > 24 && days_of_the_week[now.dayOfTheWeek()][0] == 's' && current_time == 180 && dst) {
-        int new_time = RTC.now().unixtime() - 3600;
+        int new_time = now.unixtime() - 3600;
         RTC.adjust(DateTime(new_time));
         dst = false;
-        saveSettings();
         note("Smart set to winter time");
+        saveSettings();
+        getSunriseSunset(now.day());
       }
+    }
+
+    if (current_time == 61 && now.second() == 0 && destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
+      checkForUpdate();
     }
   }
 
@@ -1069,28 +1086,26 @@ bool automaticSettings(bool light_changed) {
 
   if (result && (destination1 != actual1 || destination2 != actual2 || destination3 != actual3)) {
     note(log);
-    putOnlineData("detail", "val=" + toPercentages(destination1, steps1) + "." + toPercentages(destination2, steps2) + "." + toPercentages(destination3, steps3));
+    putOnlineData("val=" + getValue());
     prepareRotation("smart");
-
-    return true;
   } else {
     if (light_changed) {
       note("Smart didn't activate anything.");
     }
-    return false;
   }
+  return result;
 }
 
 
 void prepareRotation(String orderer) {
   String logs = "";
-  if (actual1 != destination1) {
+  if (destination1 != actual1) {
     logs = "\n 1 by " + String(destination1 - actual1) + " steps to " + toPercentages(destination1, steps1) + "%";
   }
-  if (actual2 != destination2) {
+  if (destination2 != actual2) {
     logs += "\n 2 by " + String(destination2 - actual2) + " steps to " + toPercentages(destination2, steps2) + "%";
   }
-  if (actual3 != destination3) {
+  if (destination3 != actual3) {
     logs += "\n 3 by " + String(destination3 - actual3) + " steps to " + toPercentages(destination3, steps3) + "%";
   }
   note("Movement (" + orderer + "): " + logs);
@@ -1107,7 +1122,7 @@ void calibration(int set, bool bypass) {
   bool settings_change = false;
   String logs = "";
 
-  if (strContains(String(wings), "1")) {
+  if (strContains(wings, "1")) {
     if (actual1 == 0) {
       actual1 -= set / 2;
     } else
@@ -1119,7 +1134,7 @@ void calibration(int set, bool bypass) {
       }
   }
   if (!tandem) {
-    if (strContains(String(wings), "2")) {
+    if (strContains(wings, "2")) {
       if (actual2 == 0) {
         actual2 -= set / 2;
       } else
@@ -1130,7 +1145,7 @@ void calibration(int set, bool bypass) {
           logs += "\n 2 by " + String(set) + " steps. Steps set at " + String(steps2) + ".";
         }
     }
-    if (strContains(String(wings), "3")) {
+    if (strContains(wings, "3")) {
       if (actual3 == 0) {
         actual3 -= set / 2;
       } else
@@ -1153,7 +1168,7 @@ void calibration(int set, bool bypass) {
 }
 
 void measurementRotation() {
-  if (strContains(String(wings), "1")) {
+  if (strContains(wings, "1")) {
     digitalWrite(bipolar_enable_pin[0], LOW);
     if (tandem) {
       digitalWrite(bipolar_enable_pin[1], LOW);
@@ -1161,11 +1176,11 @@ void measurementRotation() {
     actual1++;
   }
   if (!tandem) {
-    if (strContains(String(wings), "2")) {
+    if (strContains(wings, "2")) {
       digitalWrite(bipolar_enable_pin[1], LOW);
       actual2++;
     }
-    if (strContains(String(wings), "3")) {
+    if (strContains(wings, "3")) {
       digitalWrite(bipolar_enable_pin[2], LOW);
       actual3++;
     }

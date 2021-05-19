@@ -2,7 +2,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 16;
+const int version = 18;
 
 const int light_sensor_pin = A0;
 
@@ -65,11 +65,12 @@ void sayHelloToTheServer();
 void introductionToServer();
 void startServices();
 String getBlindsDetail();
+String getValue();
+String getBlindsPosition();
 String getSensorDetail();
 void handshake();
 void requestForState();
 void exchangeOfBasicData();
-void reverseDirection();
 void setMin();
 void setMax();
 void setAsMax();
