@@ -2,7 +2,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 18;
+const int version = 19;
 
 const int light_sensor_pin = A0;
 
@@ -18,17 +18,19 @@ bool reversed = false;
 bool separately = false;
 bool inverted_sequence = false;
 bool tandem = false;
+int fixit = 0;
 
 struct Smart {
   bool enabled;
-  String wing;
   String days;
-  bool lowering_at_night;
-  bool lifting_at_day;
-  int lowering_time;
+  String wing;
+  int target;
+  int time;
   int lifting_time;
-  bool lowering_at_night_and_time;
-  bool lifting_at_day_and_time;
+  bool at_night;
+  bool at_night_and_time;
+  bool at_day;
+  bool at_day_and_time;
   bool react_to_cloudiness;
   uint32_t access;
 };

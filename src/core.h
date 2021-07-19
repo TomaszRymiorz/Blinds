@@ -2,7 +2,6 @@
 #include <SPI.h>
 #include <LittleFS.h>
 #include <RTClib.h>
-#include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266mDNS.h>
@@ -17,7 +16,7 @@ ESP8266WebServer server(80);
 HTTPClient HTTP;
 WiFiClient WIFI;
 
-// core version = 18;
+// core version = 19;
 bool offline = true;
 bool keep_log = false;
 
@@ -49,6 +48,7 @@ int dawn_delay = 0;
 
 bool strContains(String text, String value);
 bool strContains(int text, String value);
+bool isStringDigit(String text);
 bool RTCisrunning();
 bool hasTimeChanged();
 void note(String text);
@@ -78,14 +78,23 @@ bool strContains(int text, String value) {
   return String(text).indexOf(value) > -1;
 }
 
+bool isStringDigit(String text) {
+  for (byte i = 0; i < text.length(); i++) {
+    if (!isDigit(text.charAt(i))) {
+      return false;
+    }
+  }
+  return text.length() > 0;
+}
+
 bool RTCisrunning() {
   // return RTC.now().unixtime() > 1546304461;
   return RTC.isrunning();
 }
 
 bool hasTimeChanged() {
-  uint32_t current_time = RTCisrunning() ? RTC.now().unixtime() : millis() / 1000;
-  if (abs(current_time - loop_time) >= 1) {
+  int current_time = RTCisrunning() ? RTC.now().unixtime() : millis() / 1000;
+  if (abs(current_time - (int)loop_time) >= 1) {
     loop_time = current_time;
     return true;
   }
@@ -190,8 +199,8 @@ void connectingToWifi() {
   if (result) {
     WiFi.setAutoReconnect(true);
 
-    startServices();
     sayHelloToTheServer();
+    startServices();
   } else {
     delay(1000);
     initiatingWPS();
@@ -231,8 +240,8 @@ void initiatingWPS() {
 
   if (result) {
     saveSettings();
-    startServices();
     sayHelloToTheServer();
+    startServices();
   } else {
     if (hasTimeChanged()) {
       automaticSettings();

@@ -1,4 +1,5 @@
 #include "core.h"
+#include <ESP8266httpUpdate.h>
 
 const String base_url = "";
 
@@ -15,9 +16,10 @@ void manualUpdate();
 void checkForUpdate();
 void getTime();
 void putOnlineData(String data);
+void putOnlineData(String data, bool bypass) ;
 void putOnlineData(String variant, String data);
 void putOnlineData(String data, bool logs, bool flawless);
-void putOnlineData(String variant, String data, bool logs, bool flawless);
+void putOnlineData(String variant, String data, bool logs, bool flawless, bool bypass);
 void getOnlineData();
 void readOnlineData(String payload);
 
@@ -28,8 +30,9 @@ void manualUpdate() {}
 void checkForUpdate() {}
 void getTime() {}
 void putOnlineData(String data) {}
+void putOnlineData(String data, bool bypass) {}
 void putOnlineData(String variant, String data) {}
 void putOnlineData(String data, bool logs, bool flawless) {}
-void putOnlineData(String variant, String data, bool logs, bool flawless) {}
+void putOnlineData(String variant, String data, bool logs, bool flawless, bool bypass) {}
 void getOnlineData() {}
 void readOnlineData(String payload) {}

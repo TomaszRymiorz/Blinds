@@ -36,10 +36,12 @@ Powtarzalność obejmuje okres jednego tygodnia, a ustawienia nie są ograniczon
 * '_' opuść o godzinie - jeśli znak występuje w zapisie, przed nim znajduje się godzina w zapisie czasu uniksowego
 * '-' podnieś o godzinie - jeśli występuje w zapisie, po nim znajduje się godzina w zapisie czasu uniksowego
 * '/' wyłącz ustawienie - obecność znaku wskazuje, że ustawienie będzie ignorowane
-
-Przykład zapisu trzech różnych ustawień automatycznych: 1140_b3w-420,b4asn,/b12ouehrn-300
+* 'b&' wszystkie wyzwalacze muszą zostać spełnione by wykonać czynność
+* cyfra bezpośrednio przed 'b', ale nie przed "_" oznacza procentową pozycję rolety
 
 Obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
+
+Przykład zapisu trzech różnych ustawień automatycznych: 1140_b3w-420,b4asn,/b12ouehrn-300
 
 ### Sterowanie
 Sterowanie urządzeniem odbywa się poprzez wykorzystanie metod dostępnych w protokole HTTP. Sterować można z przeglądarki lub dedykowanej aplikacji.
