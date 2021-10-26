@@ -2,7 +2,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 19;
+const int version = 20;
 
 const int light_sensor_pin = A0;
 
@@ -54,6 +54,7 @@ bool block_twilight_counter = false;
 bool twilight = false;
 bool twilight_sensor = false;
 bool cloudiness = false;
+bool lock = false;
 
 void setStepperOff();
 String toPercentages(int value, int steps);
