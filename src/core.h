@@ -45,6 +45,7 @@ bool also_sensors = false;
 
 int dusk_delay = 0;
 int dawn_delay = 0;
+int twilight_delay = 0;
 
 bool strContains(String text, String value);
 bool strContains(int text, String value);
@@ -392,7 +393,8 @@ void putOfflineData(String url, String data) {
 
   String logs;
 
-  HTTP.begin(WIFI, "http://" + url + "/set");
+  HTTP.begin("http://" + url + "/set");
+  HTTP.addHeader("Content-Type", "text/plain");
   int http_code = HTTP.PUT(data);
 
   if (http_code == HTTP_CODE_OK) {
@@ -403,7 +405,7 @@ void putOfflineData(String url, String data) {
 
   HTTP.end();
 
-  note("Data transfer to:\n" + logs);
+  note("Data transfer to:\n " + logs);
 }
 
 void putMultiOfflineData(String data) {
@@ -423,11 +425,12 @@ void putMultiOfflineData(String data) {
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
-    HTTP.begin(WIFI, "http://" + ip + "/set");
+    HTTP.begin("http://" + ip + "/set");
+    HTTP.addHeader("Content-Type", "text/plain");
     http_code = HTTP.PUT(data);
 
     if (http_code == HTTP_CODE_OK) {
-      logs += "\n " + ip + ": " + data;
+      logs += "\n " + ip;
     } else {
       logs += "\n " + ip + " - error "  + http_code;
     }
@@ -435,7 +438,7 @@ void putMultiOfflineData(String data) {
     HTTP.end();
   }
 
-  note("Data transfer to " + String(count) + ":" + logs);
+  note(data + " transfer to " + String(count) + ":" + logs);
 }
 
 void getOfflineData() {

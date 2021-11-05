@@ -610,6 +610,12 @@ void deactivateTheLightSensor() {
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
+
+    if (destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
+      ArduinoOTA.handle();
+    }
+    server.handleClient();
+    MDNS.update();
   } else {
     if (!sending_error) {
       note("Wi-Fi connection lost");
@@ -617,12 +623,6 @@ void loop() {
     sending_error = true;
     cancelMeasurement();
   }
-
-  if (destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
-    ArduinoOTA.handle();
-  }
-  server.handleClient();
-  MDNS.update();
 
   if (measurement) {
     measurementRotation();
@@ -639,7 +639,14 @@ void loop() {
     } else {
       getOnlineData();
     }
-    automaticSettings();
+    if (twilight_delay > 0) {
+      if (--twilight_delay == 0) {
+        automaticSettings(true);
+      }
+      automaticSettings(false);
+    } else {
+      automaticSettings();
+    }
   }
 
   if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
@@ -747,7 +754,16 @@ bool hasTheLightChanged() {
     putOnlineData("light=" + getSensorDetail(), false, false);
   }
 
-  return result;
+  if (result) {
+    if (!twilight || dusk_delay == 0 || (dusk_delay < 0 && geo_location.length() > 2)) {
+      return true;
+    } else {
+      twilight_delay = (dusk_delay * (dusk_delay < 0 ? -1 : 1)) * 60;
+      return false;
+    }
+  }
+
+  return false;
 }
 
 void readData(String payload, bool per_wifi) {
@@ -972,7 +988,7 @@ void readData(String payload, bool per_wifi) {
       if (!twilight || dusk_delay == 0 || (dusk_delay < 0 && geo_location.length() > 2)) {
           automaticSettings(true);
       } else {
-          twilight_counter = (dusk_delay * (dusk_delay < 0 ? -1 : 1)) * 60;
+          twilight_delay = (dusk_delay * (dusk_delay < 0 ? -1 : 1)) * 60;
       }
     }
   }
@@ -1153,8 +1169,7 @@ bool automaticSettings(bool light_changed) {
         } else {
           result = twilight && current_time == next_sunset && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
         }
-        result &= !smart_array[i].at_night_and_time ||
-          (smart_array[i].at_night_and_time && (smart_array[i].time < current_time || (smart_array[i].react_to_cloudiness && cloudiness)));
+        result &= !smart_array[i].at_night_and_time || (smart_array[i].at_night_and_time && smart_array[i].time < current_time);
 
         if (result) {
           if (strContains(smart_array[i].wing, "1")) {
@@ -1182,9 +1197,8 @@ bool automaticSettings(bool light_changed) {
         } else {
           result = !twilight && current_time == next_sunrise && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
         }
-        result &= smart_array[i].time == -1 || smart_array[i].time > current_time; // Podnieś jeśli nie ma czasu opuszczania lub jest wcześniej
-        result &= !smart_array[i].at_day_and_time ||
-          (smart_array[i].at_day_and_time && (smart_array[i].lifting_time < current_time || (smart_array[i].react_to_cloudiness && !cloudiness && !twilight)));
+        result &= smart_array[i].time == -1 || smart_array[i].time > current_time;
+        result &= !smart_array[i].at_day_and_time || (smart_array[i].at_day_and_time && smart_array[i].lifting_time < current_time);
 
         if (result) {
           if (strContains(smart_array[i].wing, "1")) {
