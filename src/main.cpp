@@ -9,7 +9,12 @@ void setup() {
 
   keep_log = LittleFS.exists("/log.txt");
 
-  note("iDom Blinds ." + String(version));
+  #ifdef RTC_DS1307
+    rtc.begin();
+  #endif
+
+  note("iDom Blinds " + String(version) + "." + String(core_version));
+
   offline = !LittleFS.exists("/online.txt");
   Serial.print(offline ? " OFFLINE" : " ONLINE");
 
@@ -21,13 +26,12 @@ void setup() {
   }
   resume();
 
-  RTC.begin();
-  if (RTC.isrunning()) {
-    start_time = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
+  if (RTCisrunning()) {
+    start_time = rtc.now().unixtime() - offset - (dst ? 3600 : 0);
   }
 
   int new_light = analogRead(light_sensor_pin);
-  if ((new_light > boundary || (sunset > 0 && sunrise > 0)) && new_light > 8) {
+  if (new_light > boundary || (sunset > 0 && sunrise > 0 && new_light > 8)) {
     light = new_light;
     twilight = light < boundary;
     twilight_sensor = twilight;
@@ -111,6 +115,12 @@ bool readSettings(bool backup) {
   }
   if (json_object.containsKey("sunrise")) {
     sunrise = json_object["sunrise"].as<int>();
+  }
+  if (json_object.containsKey("twilight")) {
+    twilight = json_object["twilight"].as<bool>();
+  }
+  if (json_object.containsKey("cloudiness")) {
+    cloudiness = json_object["cloudiness"].as<bool>();
   }
   if (json_object.containsKey("boundary")) {
     boundary = json_object["boundary"].as<int>();
@@ -223,6 +233,12 @@ void saveSettings(bool log) {
   if (sunrise > 0) {
     json_object["sunrise"] = sunrise;
   }
+  if (twilight) {
+    json_object["twilight"] = twilight;
+  }
+  if (cloudiness) {
+    json_object["cloudiness"] = cloudiness;
+  }
   json_object["boundary"] = boundary;
   if (reversed) {
     json_object["reversed"] = reversed;
@@ -248,10 +264,10 @@ void saveSettings(bool log) {
   if (also_sensors) {
     json_object["sensors"] = also_sensors;
   }
-  if (dusk_delay > 0) {
+  if (dusk_delay != 0) {
     json_object["dusk_delay"] = dusk_delay;
   }
-  if (dawn_delay > 0) {
+  if (dawn_delay != 0) {
     json_object["dawn_delay"] = dawn_delay;
   }
 
@@ -426,11 +442,11 @@ void handshake() {
   + "\",\"sensors\":" + also_sensors
   + ",\"version\":" + version
   + ",\"smart\":\"" + smart_string
-  + "\",\"rtc\":" + RTC.isrunning()
+  + "\",\"rtc\":" + RTCisrunning()
   + ",\"dst\":" + dst
   + ",\"offset\":" + offset
-  + ",\"time\":" + (RTC.isrunning() ? String(RTC.now().unixtime() - offset - (dst ? 3600 : 0)) : "0")
-  + ",\"active\":" + String(start_time > 0 ? RTC.now().unixtime() - offset - (dst ? 3600 : 0) - start_time : 0)
+  + ",\"time\":" + (RTCisrunning() ? String(rtc.now().unixtime() - offset - (dst ? 3600 : 0)) : "0")
+  + ",\"active\":" + (RTCisrunning() ? String((rtc.now().unixtime() - offset - (dst ? 3600 : 0)) - start_time) : "0")
   + ",\"uprisings\":" + uprisings
   + ",\"offline\":" + offline;
 
@@ -458,8 +474,8 @@ void exchangeOfBasicData() {
 
   String reply = "\"offset\":" + String(offset) + ",\"dst\":" + String(dst);
 
-  if (RTC.isrunning()) {
-    reply += ",\"time\":" + String(RTC.now().unixtime() - offset - (dst ? 3600 : 0));
+  if (RTCisrunning()) {
+    reply += ",\"time\":" + String(rtc.now().unixtime() - offset - (dst ? 3600 : 0));
   }
 
   if (light > -1) {
@@ -593,7 +609,9 @@ void endMeasurement() {
 }
 
 void initiateTheLightSensor() {
-  light = 100;
+  if (light == -1) {
+    light = 100;
+  }
   server.send(200, "text/plain", "Done");
 }
 
@@ -639,8 +657,8 @@ void loop() {
     } else {
       getOnlineData();
     }
-    if (twilight_delay > 0) {
-      if (--twilight_delay == 0) {
+    if (light_delay > 0) {
+      if (--light_delay == 0) {
         automaticSettings(true);
       }
       automaticSettings(false);
@@ -701,12 +719,21 @@ bool hasTheLightChanged() {
         change = true;
         if (++twilight_counter > (cloudiness ? 1 : 9) && (twilight_sensor ? light > boundary : light < boundary)) {
           if (geo_location.length() < 2) {
-            twilight = light < boundary;
+            if (twilight != (light < boundary)) {
+              twilight = light < boundary;
+              saveSettings();
+            }
           } else {
             if (also_sensors) {
-              twilight = light < boundary;
+              if (twilight != (light < boundary)) {
+                twilight = light < boundary;
+                saveSettings();
+              }
             } else {
-              cloudiness = light < boundary;
+              if (!twilight && cloudiness != (light < boundary)) {
+                cloudiness = light < boundary;
+                saveSettings();
+              }
             }
           }
           twilight_sensor = !twilight_sensor;
@@ -723,9 +750,9 @@ bool hasTheLightChanged() {
 
   bool sent = false;
 
-  if (RTC.isrunning()) {
-    DateTime now = RTC.now();
-    int current_time = RTC.isrunning() ? (now.hour() * 60) + now.minute() : 0;
+  if (RTCisrunning()) {
+    DateTime now = rtc.now();
+    int current_time = (now.hour() * 60) + now.minute();
 
     if ((light > -1 ? light < 100 : (geo_location.length() > 2 && current_time == next_sunset)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000)) { // || sunset <= sunrise // && (light == -1 || also_sensors)
       sunset = now.unixtime() - offset - (dst ? 3600 : 0);
@@ -751,15 +778,15 @@ bool hasTheLightChanged() {
   }
 
   if (!sent && change) {
-    putOnlineData("light=" + getSensorDetail(), false, false);
+    putOnlineData("light=" + getSensorDetail(), false, true);
   }
 
   if (result) {
-    if (!twilight || dusk_delay == 0 || (dusk_delay < 0 && geo_location.length() > 2)) {
-      return true;
-    } else {
-      twilight_delay = (dusk_delay * (dusk_delay < 0 ? -1 : 1)) * 60;
+    if (twilight ? dusk_delay != 0 : dawn_delay != 0) {
+      light_delay = ((twilight ? dusk_delay : dawn_delay) * ((twilight ? dusk_delay : dawn_delay) < 0 ? -1 : 1)) * 60;
       return false;
+    } else {
+      return true;
     }
   }
 
@@ -794,8 +821,8 @@ void readData(String payload, bool per_wifi) {
 
   if (json_object.containsKey("offset")) {
     if (offset != json_object["offset"].as<int>()) {
-      if (RTC.isrunning() && !json_object.containsKey("time")) {
-        RTC.adjust(DateTime((RTC.now().unixtime() - offset) + json_object["offset"].as<int>()));
+      if (RTCisrunning() && !json_object.containsKey("time")) {
+        rtc.adjust(DateTime((rtc.now().unixtime() - offset) + json_object["offset"].as<int>()));
         note("Time zone change");
       }
 
@@ -809,8 +836,8 @@ void readData(String payload, bool per_wifi) {
       dst = !dst;
       settings_change = true;
 
-      if (RTC.isrunning() && !json_object.containsKey("time")) {
-        RTC.adjust(DateTime(RTC.now().unixtime() + (dst ? 3600 : -3600)));
+      if (RTCisrunning() && !json_object.containsKey("time")) {
+        rtc.adjust(DateTime(rtc.now().unixtime() + (dst ? 3600 : -3600)));
         note(dst ? "Summer time" : "Winter time");
       }
     }
@@ -819,15 +846,16 @@ void readData(String payload, bool per_wifi) {
   if (json_object.containsKey("time")) {
     int new_time = json_object["time"].as<uint32_t>() + offset + (dst ? 3600 : 0);
     if (new_time > 1546304461) {
-      if (RTC.isrunning()) {
-        if (abs(new_time - (int)RTC.now().unixtime()) > 60) {
-          RTC.adjust(DateTime(new_time));
+      if (RTCisrunning()) {
+        if (abs(new_time - (int)rtc.now().unixtime()) > 60) {
+          rtc.adjust(DateTime(new_time));
+          note("Adjust time");
         }
       } else {
-        RTC.adjust(DateTime(new_time));
-        note("Adjust time");
-        start_time = RTC.now().unixtime() - offset - (dst ? 3600 : 0);
-        if (RTC.isrunning()) {
+        rtc.adjust(DateTime(new_time));
+        note("RTC begin");
+        start_time = rtc.now().unixtime() - offset - (dst ? 3600 : 0);
+        if (RTCisrunning()) {
           details_change = true;
         }
       }
@@ -933,26 +961,14 @@ void readData(String payload, bool per_wifi) {
 
   if (json_object.containsKey("dusk_delay")) {
     if (dusk_delay != json_object["dusk_delay"].as<int>()) {
-      if (next_sunset != -1) {
-        next_sunset -= dusk_delay;
-      }
       dusk_delay = json_object["dusk_delay"].as<int>();
-      if (next_sunset != -1) {
-        next_sunset += dusk_delay;
-      }
       details_change = true;
     }
   }
 
   if (json_object.containsKey("dawn_delay")) {
     if (dawn_delay != json_object["dawn_delay"].as<int>()) {
-      if (next_sunrise != -1) {
-        next_sunrise -= dawn_delay;
-      }
       dawn_delay = json_object["dawn_delay"].as<int>();
-      if (next_sunset != -1) {
-        next_sunrise += dawn_delay;
-      }
       details_change = true;
     }
   }
@@ -960,7 +976,7 @@ void readData(String payload, bool per_wifi) {
   if (json_object.containsKey("location")) {
     if (geo_location != json_object["location"].as<String>()) {
       geo_location = json_object["location"].as<String>();
-      getSunriseSunset(RTC.now().day());
+      getSunriseSunset(rtc.now().day());
       details_change = true;
     }
   }
@@ -981,14 +997,17 @@ void readData(String payload, bool per_wifi) {
         if (also_sensors) {
           twilight = !twilight;
         } else {
-          cloudiness = !cloudiness;
+          if (!twilight) {
+            cloudiness = !cloudiness;
+          }
         }
       }
+      settings_change = true;
 
-      if (!twilight || dusk_delay == 0 || (dusk_delay < 0 && geo_location.length() > 2)) {
-          automaticSettings(true);
+      if (twilight ? dusk_delay != 0 : dawn_delay != 0) {
+        light_delay = ((twilight ? dusk_delay : dawn_delay) * ((twilight ? dusk_delay : dawn_delay) < 0 ? -1 : 1)) * 60;
       } else {
-          twilight_delay = (dusk_delay * (dusk_delay < 0 ? -1 : 1)) * 60;
+        automaticSettings(true);
       }
     }
   }
@@ -1001,7 +1020,7 @@ void readData(String payload, bool per_wifi) {
     if (details_change) {
       result += String(result.length() > 0 ? "&" : "") + "detail=" + getBlindsDetail();
     }
-    putOnlineData(result);
+    putOnlineData(result, true);
   }
 }
 
@@ -1108,11 +1127,11 @@ bool automaticSettings() {
 
 bool automaticSettings(bool light_changed) {
   bool result = false;
-  DateTime now = RTC.now();
+  DateTime now = rtc.now();
   String log = "Smart ";
   int current_time = -1;
 
-  if (RTC.isrunning()) {
+  if (RTCisrunning()) {
     current_time = (now.hour() * 60) + now.minute();
 
     if (geo_location.length() > 2) {
@@ -1121,17 +1140,17 @@ bool automaticSettings(bool light_changed) {
       }
 
       if (next_sunset > -1 && next_sunrise > -1) {
-        if (current_time == next_sunset) {
-          twilight = true;
+        if (((current_time == (next_sunset + dusk_delay)) || (current_time == (next_sunrise + dawn_delay))) && now.second() == 0) {
+          if (twilight && current_time == (next_sunrise + dawn_delay)) {
+            twilight = false;
+          }
+          if (!twilight && current_time == (next_sunset + dusk_delay)) {
+            twilight = true;
+          }
           cloudiness = false;
           light_changed = false;
           lock = false;
-        }
-        if (current_time == next_sunrise) {
-          twilight = false;
-          cloudiness = false;
-          light_changed = false;
-          lock = false;
+          saveSettings();
         }
       }
     }
@@ -1139,7 +1158,7 @@ bool automaticSettings(bool light_changed) {
     if (current_time == 120 || current_time == 180) {
       if (now.month() == 3 && now.day() > 24 && days_of_the_week[now.dayOfTheWeek()][0] == 's' && current_time == 120 && !dst) {
         int new_time = now.unixtime() + 3600;
-        RTC.adjust(DateTime(new_time));
+        rtc.adjust(DateTime(new_time));
         dst = true;
         note("Smart set to summer time");
         saveSettings();
@@ -1147,7 +1166,7 @@ bool automaticSettings(bool light_changed) {
       }
       if (now.month() == 10 && now.day() > 24 && days_of_the_week[now.dayOfTheWeek()][0] == 's' && current_time == 180 && dst) {
         int new_time = now.unixtime() - 3600;
-        RTC.adjust(DateTime(new_time));
+        rtc.adjust(DateTime(new_time));
         dst = false;
         note("Smart set to winter time");
         saveSettings();
@@ -1155,21 +1174,21 @@ bool automaticSettings(bool light_changed) {
       }
     }
 
-    if (current_time == 91 && now.second() == 0 && destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
-      checkForUpdate();
+    if (current_time == (WiFi.localIP()[3] / 2) && now.second() == 0 && destination1 == actual1 && destination2 == actual2 && destination3 == actual3) {
+      checkForUpdate(false);
     }
   }
 
   int i = -1;
   while (++i < smart_count) {
-    if (smart_array[i].enabled && (strContains(smart_array[i].days, "w") || (RTC.isrunning() && strContains(smart_array[i].days, days_of_the_week[now.dayOfTheWeek()])))) {
+    if (smart_array[i].enabled && (strContains(smart_array[i].days, "w") || (RTCisrunning() && strContains(smart_array[i].days, days_of_the_week[now.dayOfTheWeek()])))) {
       if (smart_array[i].at_night) {
         if (light_changed) {
           result = also_sensors ? twilight : smart_array[i].react_to_cloudiness && cloudiness;
         } else {
-          result = twilight && current_time == next_sunset && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
+          result = twilight && current_time == (next_sunset + dusk_delay) && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
         }
-        result &= !smart_array[i].at_night_and_time || (smart_array[i].at_night_and_time && smart_array[i].time < current_time);
+        result &= !smart_array[i].at_night_and_time || (smart_array[i].at_night_and_time && smart_array[i].time < current_time && current_time > -1);
 
         if (result) {
           if (strContains(smart_array[i].wing, "1")) {
@@ -1195,10 +1214,10 @@ bool automaticSettings(bool light_changed) {
           result = also_sensors ? !twilight : smart_array[i].react_to_cloudiness && !cloudiness;
           result &= !lock;
         } else {
-          result = !twilight && current_time == next_sunrise && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
+          result = !twilight && current_time == (next_sunrise + dawn_delay) && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
         }
-        result &= smart_array[i].time == -1 || smart_array[i].time > current_time;
-        result &= !smart_array[i].at_day_and_time || (smart_array[i].at_day_and_time && smart_array[i].lifting_time < current_time);
+        result &= smart_array[i].time == -1 || (smart_array[i].time > current_time && current_time > -1);
+        result &= !smart_array[i].at_day_and_time || (smart_array[i].at_day_and_time && smart_array[i].lifting_time < current_time && current_time > -1);
 
         if (result) {
           if (strContains(smart_array[i].wing, "1")) {
@@ -1219,7 +1238,7 @@ bool automaticSettings(bool light_changed) {
         }
       }
 
-      if (!result && RTC.isrunning() && smart_array[i].access + 60 < now.unixtime()) {
+      if (!result && current_time > -1 && smart_array[i].access + 60 < now.unixtime()) {
         result = smart_array[i].time == current_time;
         result &= !smart_array[i].at_night_and_time || (smart_array[i].at_night_and_time && twilight);
 

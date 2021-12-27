@@ -9,14 +9,17 @@
 #include <ArduinoOTA.h>
 #include "main.h"
 
-RTC_DS1307 RTC;
-// RTC_Millis RTC;
+#ifdef physical_clock
+  RTC_DS1307 rtc;
+#else
+  RTC_Millis rtc;
+#endif
 
 ESP8266WebServer server(80);
-HTTPClient HTTP;
-WiFiClient WIFI;
+WiFiClient wifiClient;
+HTTPClient httpClient;
 
-// core version = 19;
+const int core_version = 20;
 bool offline = true;
 bool keep_log = false;
 
@@ -45,7 +48,7 @@ bool also_sensors = false;
 
 int dusk_delay = 0;
 int dawn_delay = 0;
-int twilight_delay = 0;
+int light_delay = 0;
 
 bool strContains(String text, String value);
 bool strContains(int text, String value);
@@ -89,12 +92,15 @@ bool isStringDigit(String text) {
 }
 
 bool RTCisrunning() {
-  // return RTC.now().unixtime() > 1546304461;
-  return RTC.isrunning();
+  #ifdef RTC_DS1307
+    return rtc.isrunning();
+  #else
+    return rtc.now().unixtime() > 1546304461;
+  #endif
 }
 
 bool hasTimeChanged() {
-  int current_time = RTCisrunning() ? RTC.now().unixtime() : millis() / 1000;
+  int current_time = RTCisrunning() ? rtc.now().unixtime() : millis() / 1000;
   if (abs(current_time - (int)loop_time) >= 1) {
     loop_time = current_time;
     return true;
@@ -106,7 +112,7 @@ void note(String text) {
 
   String logs = strContains(text, "iDom") ? "\n[" : "[";
   if (RTCisrunning()) {
-    DateTime now = RTC.now();
+    DateTime now = rtc.now();
     logs += now.day();
     logs += ".";
     logs += now.month();
@@ -200,8 +206,8 @@ void connectingToWifi() {
   if (result) {
     WiFi.setAutoReconnect(true);
 
-    sayHelloToTheServer();
     startServices();
+    sayHelloToTheServer();
   } else {
     delay(1000);
     initiatingWPS();
@@ -234,6 +240,7 @@ void initiatingWPS() {
 
     logs += " finished. ";
     logs += "Connected to " + WiFi.SSID();
+    logs += " : " + WiFi.localIP().toString();
   } else {
     logs += " timed out";
   }
@@ -241,8 +248,8 @@ void initiatingWPS() {
 
   if (result) {
     saveSettings();
-    sayHelloToTheServer();
     startServices();
+    sayHelloToTheServer();
   } else {
     if (hasTimeChanged()) {
       automaticSettings();
@@ -325,29 +332,27 @@ void getSunriseSunset(int day) {
   String location = "lat=" + geo_location;
   location.replace("x", "&lng=");
 
-  HTTP.begin("http://api.sunrise-sunset.org/json?" + location);
-  HTTP.addHeader("Content-Type", "text/plain");
+  httpClient.begin(wifiClient, "http://api.sunrise-sunset.org/json?" + location);
+  httpClient.addHeader("Content-Type", "text/plain");
 
-  if (HTTP.GET() == HTTP_CODE_OK) {
+  if (httpClient.GET() == HTTP_CODE_OK) {
     DynamicJsonDocument json_object(1024);
-    deserializeJson(json_object, HTTP.getString());
+    deserializeJson(json_object, httpClient.getString());
     JsonObject object = json_object["results"];
 
     if (object.containsKey("sunrise") && object.containsKey("sunset")) {
       String data = object["sunrise"].as<String>();
       next_sunrise = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
-      next_sunrise += dawn_delay;
 
       data = object["sunset"].as<String>();
       next_sunset = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
-      next_sunset += dusk_delay;
 
       last_sun_check = day;
-      note("Sunset: " + String(next_sunset) + " / Sunrise: " + String(next_sunrise));
+      note("Sunrise: " + String(next_sunrise) + " / Sunset: " + String(next_sunset));
     }
   }
 
-  HTTP.end();
+  httpClient.end();
 }
 
 int findMDNSDevices() {
@@ -393,9 +398,9 @@ void putOfflineData(String url, String data) {
 
   String logs;
 
-  HTTP.begin("http://" + url + "/set");
-  HTTP.addHeader("Content-Type", "text/plain");
-  int http_code = HTTP.PUT(data);
+  httpClient.begin(wifiClient, "http://" + url + "/set");
+  httpClient.addHeader("Content-Type", "text/plain");
+  int http_code = httpClient.PUT(data);
 
   if (http_code == HTTP_CODE_OK) {
     logs = url + ": " + data;
@@ -403,13 +408,13 @@ void putOfflineData(String url, String data) {
     logs = url + " - error "  + http_code;
   }
 
-  HTTP.end();
+  httpClient.end();
 
   note("Data transfer to:\n " + logs);
 }
 
 void putMultiOfflineData(String data) {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED || data.length() < 2) {
     return;
   }
 
@@ -425,9 +430,13 @@ void putMultiOfflineData(String data) {
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
-    HTTP.begin("http://" + ip + "/set");
-    HTTP.addHeader("Content-Type", "text/plain");
-    http_code = HTTP.PUT(data);
+    if (wifiClient.available() == 0) {
+      wifiClient.stop();
+    }
+
+    httpClient.begin(wifiClient, "http://" + ip + "/set");
+    httpClient.addHeader("Content-Type", "text/plain");
+    http_code = httpClient.PUT(data);
 
     if (http_code == HTTP_CODE_OK) {
       logs += "\n " + ip;
@@ -435,7 +444,7 @@ void putMultiOfflineData(String data) {
       logs += "\n " + ip + " - error "  + http_code;
     }
 
-    HTTP.end();
+    httpClient.end();
   }
 
   note(data + " transfer to " + String(count) + ":" + logs);
@@ -459,12 +468,17 @@ void getOfflineData() {
   for (int i = 0; i < count; i++) {
     ip = get1(devices, i);
 
-    HTTP.begin(WIFI, "http://" + ip + "/basicdata");
-    http_code = HTTP.POST("{\"id\":\"" + String(WiFi.macAddress()) + "\"}");
+    if (wifiClient.available() == 0) {
+      wifiClient.stop();
+    }
+
+    httpClient.begin(wifiClient, "http://" + ip + "/basicdata");
+    httpClient.addHeader("Content-Type", "text/plain");
+    http_code = httpClient.POST("");
 
     if (http_code == HTTP_CODE_OK) {
-      if (HTTP.getSize() > 15) {
-        data = HTTP.getString();
+      if (httpClient.getSize() > 15) {
+        data = httpClient.getString();
         logs +=  "\n " + ip + ": " + data;
         readData(data, true);
       }
@@ -472,7 +486,7 @@ void getOfflineData() {
       logs += "\n " + ip + ": error " + http_code;
     }
 
-    HTTP.end();
+    httpClient.end();
   }
 
   note("Received data..." + logs);

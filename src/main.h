@@ -1,8 +1,10 @@
 #include <Arduino.h>
 
+#define physical_clock
+
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 21;
+const int version = 23;
 
 const int light_sensor_pin = A0;
 
