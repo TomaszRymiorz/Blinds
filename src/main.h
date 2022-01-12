@@ -4,7 +4,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 23;
+const int version = 24;
 
 const int light_sensor_pin = A0;
 
@@ -52,6 +52,7 @@ int twilight_counter = 0;
 int daybreak_counter = 0;
 uint32_t sunset = 0;
 uint32_t sunrise = 0;
+uint32_t overstep = 0;
 bool block_twilight_counter = false;
 bool twilight = false;
 bool twilight_sensor = false;

@@ -46,7 +46,7 @@ void setup() {
   setupOTA();
 
   if (ssid != "" && password != "") {
-    connectingToWifi();
+    connectingToWifi(false);
   } else {
     initiatingWPS();
   }
@@ -104,6 +104,9 @@ bool readSettings(bool backup) {
   if (json_object.containsKey("uprisings")) {
     uprisings = json_object["uprisings"].as<int>() + 1;
   }
+  if (json_object.containsKey("log")) {
+    last_accessed_log = json_object["log"].as<int>() + 1;
+  }
   if (json_object.containsKey("offset")) {
     offset = json_object["offset"].as<int>();
   }
@@ -115,6 +118,9 @@ bool readSettings(bool backup) {
   }
   if (json_object.containsKey("sunrise")) {
     sunrise = json_object["sunrise"].as<int>();
+  }
+  if (json_object.containsKey("overstep")) {
+    overstep = json_object["overstep"].as<int>();
   }
   if (json_object.containsKey("twilight")) {
     twilight = json_object["twilight"].as<bool>();
@@ -221,6 +227,9 @@ void saveSettings(bool log) {
     json_object["smart"] = smart_string;
   }
   json_object["uprisings"] = uprisings;
+  if (last_accessed_log > 0) {
+    json_object["log"] = last_accessed_log;
+  }
   if (offset > 0) {
     json_object["offset"] = offset;
   }
@@ -232,6 +241,9 @@ void saveSettings(bool log) {
   }
   if (sunrise > 0) {
     json_object["sunrise"] = sunrise;
+  }
+  if (overstep > 0) {
+    json_object["overstep"] = overstep;
   }
   if (twilight) {
     json_object["twilight"] = twilight;
@@ -409,7 +421,7 @@ String getBlindsPosition() {
 }
 
 String getSensorDetail() {
-  return light > -1 ? (String(light) + String(twilight_sensor ? "t" : "") + (twilight_counter > 0 ? ("," + String(twilight_counter)) : "")) : "-1";
+  return light > -1 ? (String(light) + (twilight_sensor ? "t" : "") + (twilight_counter > 0 ? ("," + String(twilight_counter)) : "")) : "-1";
 }
 
 void handshake() {
@@ -432,15 +444,17 @@ void handshake() {
   + ",\"dawn_delay\":" + dawn_delay
   + ",\"steps\":\"" + steps1 + "." + steps2 + "." + steps3
   + "\",\"boundary\":" + boundary
+  + ",\"overstep\":" + overstep
   + ",\"reversed\":" + reversed
   + ",\"separately\":" + separately
   + ",\"inverted\":" + inverted_sequence
   + ",\"tandem\":" + tandem
   + ",\"fixit\":" + fixit
   + ",\"lock\":" + lock
+  + ",\"last_accessed_log\":" + last_accessed_log
   + ",\"location\":\"" + geo_location
   + "\",\"sensors\":" + also_sensors
-  + ",\"version\":" + version
+  + ",\"version\":" + version + "." + core_version
   + ",\"smart\":\"" + smart_string
   + "\",\"rtc\":" + RTCisrunning()
   + ",\"dst\":" + dst
@@ -611,6 +625,7 @@ void endMeasurement() {
 void initiateTheLightSensor() {
   if (light == -1) {
     light = 100;
+    twilight_sensor = twilight;
   }
   server.send(200, "text/plain", "Done");
 }
@@ -635,10 +650,14 @@ void loop() {
     server.handleClient();
     MDNS.update();
   } else {
-    if (!sending_error) {
-      note("Wi-Fi connection lost");
+    if (ssid != "" && password != "") {
+      connectingToWifi(false);
+    } else {
+      if (!sending_error) {
+        sending_error = true;
+        note("Wi-Fi connection lost");
+      }
     }
-    sending_error = true;
     cancelMeasurement();
   }
 
@@ -708,6 +727,7 @@ bool hasTheLightChanged() {
   }
 
   bool result = false;
+  bool settings_change = false;
 
   if (light > -1) {
     if (block_twilight_counter) {
@@ -721,18 +741,15 @@ bool hasTheLightChanged() {
           if (geo_location.length() < 2) {
             if (twilight != (light < boundary)) {
               twilight = light < boundary;
-              saveSettings();
             }
           } else {
             if (also_sensors) {
               if (twilight != (light < boundary)) {
                 twilight = light < boundary;
-                saveSettings();
               }
             } else {
               if (!twilight && cloudiness != (light < boundary)) {
                 cloudiness = light < boundary;
-                saveSettings();
               }
             }
           }
@@ -740,6 +757,12 @@ bool hasTheLightChanged() {
           result = true;
           block_twilight_counter = true;
           twilight_counter = 0;
+          if (RTCisrunning()) {
+            DateTime now = rtc.now();
+            overstep = now.unixtime() - offset - (dst ? 3600 : 0);
+            putOnlineData("rise=" + String(sunrise) + "," + String(overstep));
+          }
+          settings_change = true;
           putMultiOfflineData("{\"light\":\"" + String(light) + String(twilight_sensor ? "t" : "") + "\"}");
         }
       } else {
@@ -754,21 +777,17 @@ bool hasTheLightChanged() {
     DateTime now = rtc.now();
     int current_time = (now.hour() * 60) + now.minute();
 
-    if ((light > -1 ? light < 100 : (geo_location.length() > 2 && current_time == next_sunset)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000)) { // || sunset <= sunrise // && (light == -1 || also_sensors)
+    if ((light > -1 ? light < 100 : (geo_location.length() > 2 && current_time == next_sunset)) && ((now.unixtime() - offset - (dst ? 3600 : 0) - sunset > 72000) || (sunset < sunrise && current_time > 720 && current_time < 1380))) {
       sunset = now.unixtime() - offset - (dst ? 3600 : 0);
       putOnlineData("set=" + String(sunset) + "&light=" + getSensorDetail());
-      if (!result) {
-        saveSettings();
-      }
+      settings_change = true;
       sent = true;
     }
-    if ((light > -1 ? light > 100 : (light == -1 && geo_location.length() > 2 && current_time == next_sunrise)) && (now.unixtime() - offset - (dst ? 3600 : 0) - sunrise > 72000)) { // || sunrise <= sunset // && (light == -1 || also_sensors)
+    if ((light > -1 ? light > 100 : (geo_location.length() > 2 && current_time == next_sunrise)) && ((now.unixtime() - offset - (dst ? 3600 : 0) - sunrise > 72000) || (sunrise < sunset && current_time > 60 && current_time < 720))) {
       if (++daybreak_counter > 9 || geo_location.length() > 2) {
         sunrise = now.unixtime() - offset - (dst ? 3600 : 0);
-        putOnlineData("rise=" + String(sunrise) + "&light=" + getSensorDetail());
-        if (!result) {
-          saveSettings();
-        }
+        putOnlineData("rise=" + String(sunrise) + (overstep > 0 ? "," + String(overstep) : "") + "&light=" + getSensorDetail());
+        settings_change = true;
         sent = true;
         daybreak_counter = 0;
       }
@@ -777,6 +796,9 @@ bool hasTheLightChanged() {
     }
   }
 
+  if (settings_change) {
+    saveSettings();
+  }
   if (!sent && change) {
     putOnlineData("light=" + getSensorDetail(), false, true);
   }
@@ -991,23 +1013,29 @@ void readData(String payload, bool per_wifi) {
   if (json_object.containsKey("light") && light == -1) {
     if (((geo_location.length() < 2 || also_sensors) && twilight != strContains(json_object["light"].as<String>(), "t"))
     || (geo_location.length() > 2 && !also_sensors && cloudiness != strContains(json_object["light"].as<String>(), "t"))) {
+      bool light_changed = false;
       if (geo_location.length() < 2) {
         twilight = !twilight;
+        light_changed = true;
       } else {
         if (also_sensors) {
           twilight = !twilight;
+          light_changed = true;
         } else {
           if (!twilight) {
             cloudiness = !cloudiness;
+            light_changed = true;
           }
         }
       }
       settings_change = true;
 
-      if (twilight ? dusk_delay != 0 : dawn_delay != 0) {
-        light_delay = ((twilight ? dusk_delay : dawn_delay) * ((twilight ? dusk_delay : dawn_delay) < 0 ? -1 : 1)) * 60;
-      } else {
-        automaticSettings(true);
+      if (light_changed) {
+        if ((geo_location.length() < 2 || also_sensors) && (twilight ? dusk_delay != 0 : dawn_delay != 0)) {
+          light_delay = ((twilight ? dusk_delay : dawn_delay) * ((twilight ? dusk_delay : dawn_delay) < 0 ? -1 : 1)) * 60;
+        } else {
+          automaticSettings(true);
+        }
       }
     }
   }
@@ -1140,17 +1168,18 @@ bool automaticSettings(bool light_changed) {
       }
 
       if (next_sunset > -1 && next_sunrise > -1) {
-        if (((current_time == (next_sunset + dusk_delay)) || (current_time == (next_sunrise + dawn_delay))) && now.second() == 0) {
+        if ((current_time == (next_sunset + dusk_delay)) || (current_time == (next_sunrise + dawn_delay))) {
+          cloudiness = false;
           if (twilight && current_time == (next_sunrise + dawn_delay)) {
             twilight = false;
+            saveSettings();
           }
           if (!twilight && current_time == (next_sunset + dusk_delay)) {
             twilight = true;
+            saveSettings();
           }
-          cloudiness = false;
           light_changed = false;
           lock = false;
-          saveSettings();
         }
       }
     }
@@ -1171,6 +1200,12 @@ bool automaticSettings(bool light_changed) {
         note("Smart set to winter time");
         saveSettings();
         getSunriseSunset(now.day());
+      }
+    }
+
+    if (current_time == 60 && now.second() == 0) {
+      if (last_accessed_log++ > 14) {
+        deactivationTheLog();
       }
     }
 
@@ -1203,6 +1238,7 @@ bool automaticSettings(bool light_changed) {
           log += smart_array[i].target == -1 ? "lowering" : String(smart_array[i].target) + "%";
           log += " at ";
           log += light_changed && smart_array[i].react_to_cloudiness && cloudiness ? "cloudiness" : String(light_changed ? "sensor " : "") + "dusk";
+          log += !light_changed && current_time == (next_sunset + dusk_delay) && current_time > -1 && dusk_delay != 0 ? " " + String(dusk_delay) : "";
           if (smart_array[i].at_night_and_time && twilight) {
             log += " and time";
           }
@@ -1211,7 +1247,7 @@ bool automaticSettings(bool light_changed) {
 
       if (!result && smart_array[i].at_day) {
         if (light_changed) {
-          result = also_sensors ? !twilight : smart_array[i].react_to_cloudiness && !cloudiness;
+          result = also_sensors ? !twilight : smart_array[i].react_to_cloudiness && !cloudiness && !twilight;
           result &= !lock;
         } else {
           result = !twilight && current_time == (next_sunrise + dawn_delay) && current_time > -1 && smart_array[i].access + 60 < now.unixtime();
@@ -1232,6 +1268,7 @@ bool automaticSettings(bool light_changed) {
           log += smart_array[i].target == -1 ? "lifting" : String(smart_array[i].target) + "%";
           log += " at ";
           log += light_changed && smart_array[i].react_to_cloudiness && !cloudiness ? "sunshine" : String(light_changed ? "sensor " : "") + "dawn";
+          log += !light_changed && current_time == (next_sunrise + dawn_delay) && current_time > -1 && dawn_delay != 0 ? " " + String(dawn_delay) : "";
           if (smart_array[i].at_day_and_time && !twilight) {
             log += " and time";
           }
