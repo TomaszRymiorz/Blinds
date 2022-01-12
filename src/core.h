@@ -19,9 +19,10 @@ ESP8266WebServer server(80);
 WiFiClient wifiClient;
 HTTPClient httpClient;
 
-const int core_version = 20;
+const int core_version = 21;
 bool offline = true;
 bool keep_log = false;
+int last_accessed_log = 0;
 
 const char days_of_the_week[7][2] = {"s", "o", "u", "e", "h", "r", "a"};
 char host_name[30] = {0};
@@ -60,6 +61,7 @@ bool writeObjectToFile(String name, DynamicJsonDocument object);
 String get1(String text, int index);
 String getSmartString();
 void connectingToWifi();
+void connectingToWifi(bool strenuously);
 void initiatingWPS();
 void activationTheLog();
 void deactivationTheLog();
@@ -176,6 +178,10 @@ String getSmartString() {
 
 
 void connectingToWifi() {
+  connectingToWifi(true);
+}
+
+void connectingToWifi(bool strenuously) {
   String logs = "Connecting to Wi-Fi";
   Serial.print("\n" + logs);
 
@@ -204,13 +210,15 @@ void connectingToWifi() {
   note(logs);
 
   if (result) {
-    WiFi.setAutoReconnect(true);
-
     startServices();
     sayHelloToTheServer();
+    WiFi.setAutoReconnect(true);
+    password = "";
   } else {
-    delay(1000);
-    initiatingWPS();
+    if (strenuously) {
+      delay(1000);
+      initiatingWPS();
+    }
   }
 }
 
@@ -250,6 +258,8 @@ void initiatingWPS() {
     saveSettings();
     startServices();
     sayHelloToTheServer();
+    WiFi.setAutoReconnect(true);
+    password = "";
   } else {
     if (hasTimeChanged()) {
       automaticSettings();
@@ -274,6 +284,7 @@ void activationTheLog() {
     file.println();
     file.close();
   }
+  last_accessed_log = 0;
   keep_log = true;
 
   server.send(200, "text/plain", "The log has been activated");
@@ -288,6 +299,7 @@ void deactivationTheLog() {
   if (LittleFS.exists("/log.txt")) {
     LittleFS.remove("/log.txt");
   }
+  last_accessed_log = 0;
   keep_log = false;
 
   server.send(200, "text/plain", "The log has been deactivated");
@@ -306,6 +318,8 @@ void requestForLogs() {
     server.sendContent(String(char(file.read())));
   }
   file.close();
+
+  last_accessed_log = 0;
 
   server.send(200, "text/html", "Done");
 }
