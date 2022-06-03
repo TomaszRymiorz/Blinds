@@ -15,7 +15,6 @@ void activationOnlineMode();
 void deactivationOnlineMode();
 void manualUpdate();
 void checkForUpdate(bool force);
-void getTime();
 void putOnlineData(String data);
 void putOnlineData(String data, bool bypass) ;
 void putOnlineData(String variant, String data);
@@ -29,7 +28,6 @@ void activationOnlineMode() {}
 void deactivationOnlineMode() {}
 void manualUpdate() {}
 void checkForUpdate(bool force) {}
-void getTime() {}
 void putOnlineData(String data) {}
 void putOnlineData(String data, bool bypass) {}
 void putOnlineData(String variant, String data) {}

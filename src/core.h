@@ -2,6 +2,9 @@
 #include <SPI.h>
 #include <LittleFS.h>
 #include <RTClib.h>
+#include <sunset.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266mDNS.h>
@@ -18,8 +21,11 @@
 ESP8266WebServer server(80);
 WiFiClient wifiClient;
 HTTPClient httpClient;
+WiFiUDP wifiUdp;
+NTPClient ntpClient(wifiUdp);
+SunSet sun;
 
-const int core_version = 21;
+const int core_version = 23;
 bool offline = true;
 bool keep_log = false;
 int last_accessed_log = 0;
@@ -30,6 +36,7 @@ String devices = "";
 
 String ssid = "";
 String password = "";
+bool auto_reconnect = false;
 
 uint32_t start_time = 0;
 uint32_t loop_time = 0;
@@ -41,11 +48,11 @@ String smart_string = "0";
 Smart *smart_array;
 int smart_count = 0;
 
-String geo_location = "0";
+String default_location = "52.2337172x21.0714322";
+String geo_location = default_location;
 int last_sun_check = -1;
 int next_sunset = -1;
 int next_sunrise = -1;
-bool also_sensors = false;
 
 int dusk_delay = 0;
 int dawn_delay = 0;
@@ -60,14 +67,13 @@ void note(String text);
 bool writeObjectToFile(String name, DynamicJsonDocument object);
 String get1(String text, int index);
 String getSmartString();
-void connectingToWifi();
-void connectingToWifi(bool strenuously);
+void connectingToWifi(bool use_wps);
 void initiatingWPS();
 void activationTheLog();
 void deactivationTheLog();
 void requestForLogs();
 void clearTheLog();
-void getSunriseSunset(int day);
+void getSunriseSunset(DateTime now);
 int findMDNSDevices();
 void receivedOfflineData();
 void putOfflineData(String url, String data);
@@ -177,11 +183,12 @@ String getSmartString() {
 }
 
 
-void connectingToWifi() {
-  connectingToWifi(true);
-}
+void connectingToWifi(bool use_wps) {
+  if (ssid == "" || password == "") {
+    initiatingWPS();
+    return;
+  }
 
-void connectingToWifi(bool strenuously) {
   String logs = "Connecting to Wi-Fi";
   Serial.print("\n" + logs);
 
@@ -213,10 +220,9 @@ void connectingToWifi(bool strenuously) {
     startServices();
     sayHelloToTheServer();
     WiFi.setAutoReconnect(true);
-    password = "";
+    auto_reconnect = true;
   } else {
-    if (strenuously) {
-      delay(1000);
+    if (use_wps) {
       initiatingWPS();
     }
   }
@@ -259,16 +265,7 @@ void initiatingWPS() {
     startServices();
     sayHelloToTheServer();
     WiFi.setAutoReconnect(true);
-    password = "";
-  } else {
-    if (hasTimeChanged()) {
-      automaticSettings();
-    }
-    if (ssid != "" && password != "") {
-      connectingToWifi();
-    } else {
-      initiatingWPS();
-    }
+    auto_reconnect = true;
   }
 }
 
@@ -338,35 +335,21 @@ void clearTheLog() {
 }
 
 
-void getSunriseSunset(int day) {
-  if (WiFi.status() != WL_CONNECTED || geo_location.length() < 2) {
+void getSunriseSunset(DateTime now) {
+  if (geo_location.length() < 2) {
     return;
   }
 
-  String location = "lat=" + geo_location;
-  location.replace("x", "&lng=");
+  sun.setCurrentDate(now.year(), now.month(), now.day());
 
-  httpClient.begin(wifiClient, "http://api.sunrise-sunset.org/json?" + location);
-  httpClient.addHeader("Content-Type", "text/plain");
-
-  if (httpClient.GET() == HTTP_CODE_OK) {
-    DynamicJsonDocument json_object(1024);
-    deserializeJson(json_object, httpClient.getString());
-    JsonObject object = json_object["results"];
-
-    if (object.containsKey("sunrise") && object.containsKey("sunset")) {
-      String data = object["sunrise"].as<String>();
-      next_sunrise = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
-
-      data = object["sunset"].as<String>();
-      next_sunset = ((data.substring(0, data.indexOf(":")).toInt() + (strContains(data, "PM") ? 12 : 0) + (offset > 0 ? offset / 3600 : 0) + (dst ? 1 : 0)) * 60) + data.substring(data.indexOf(":") + 1, data.indexOf(":") + 3).toInt();
-
-      last_sun_check = day;
-      note("Sunrise: " + String(next_sunrise) + " / Sunset: " + String(next_sunset));
-    }
+  next_sunrise = sun.calcSunrise() + (offset > 0 ? offset / 60 : 0) + (dst ? 60 : 0);
+  next_sunset = sun.calcSunset() + (offset > 0 ? offset / 60 : 0) + (dst ? 60 : 0);
+  last_sun_check = now.day();
+  note("Sunrise: " + String(next_sunrise) + " / Sunset: " + String(next_sunset));
+  if (twilight != !(next_sunrise < (now.hour() * 60) + now.minute() && (now.hour() * 60) + now.minute() < next_sunset)) {
+    twilight = !twilight;
+    saveSettings();
   }
-
-  httpClient.end();
 }
 
 int findMDNSDevices() {
@@ -411,6 +394,10 @@ void putOfflineData(String url, String data) {
   }
 
   String logs;
+
+  if (wifiClient.available() == 0) {
+    wifiClient.stop();
+  }
 
   httpClient.begin(wifiClient, "http://" + url + "/set");
   httpClient.addHeader("Content-Type", "text/plain");
