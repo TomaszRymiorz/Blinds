@@ -4,7 +4,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 26;
+const int version = 27;
 
 const int light_sensor_pin = A0;
 
@@ -21,7 +21,12 @@ bool reversed = false;
 bool separately = false;
 bool inverted_sequence = false;
 bool tandem = false;
-int fixit = 0;
+int fixit1 = 0;
+int fixit2 = 0;
+int fixit3 = 0;
+int cycles1 = 0;
+int cycles2 = 0;
+int cycles3 = 0;
 
 struct Smart {
   bool enabled;
@@ -70,6 +75,8 @@ String getBlindsDetail();
 String getValue();
 String getPosition();
 String getSensorDetail(bool basic);
+String getCycles();
+String getFixit();
 void sayHelloToTheServer();
 void introductionToServer();
 void startServices();
@@ -91,6 +98,6 @@ void cancelMeasurement();
 void endMeasurement();
 void setStepperOff();
 void prepareRotation(String orderer);
-void calibration(int set, bool bypass);
+void calibration(int set, bool positioning, bool fixit);
 void measurementRotation();
 void rotation();

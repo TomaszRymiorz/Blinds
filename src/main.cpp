@@ -100,8 +100,8 @@ void loop() {
       if (LittleFS.exists("/resume.txt")) {
         LittleFS.remove("/resume.txt");
       }
-      if (wings != 0 && fixit != 0) {
-        calibration(fixit * -1, false);
+      if (wings != 0 && (fixit1 != 0 || fixit2 != 0 || fixit3 != 0)) {
+        calibration(0, false, true);
       }
     }
   }
@@ -109,11 +109,11 @@ void loop() {
 
 
 String toPercentages(int value, int steps) {
-  return String(value > 0 && steps > 0 ? (value * 100 / steps) : 0);
+  return String(value > 0 && steps > 0 ? (int)round((value + 0.0) * 100 / steps) : 0);
 }
 
 int toSteps(int value, int steps) {
-  return value > 0 && steps > 0 ? (value * steps / 100) : 0;
+  return value > 0 && steps > 0 ? round((value + 0.0) * steps / 100) : 0;
 }
 
 
@@ -151,8 +151,17 @@ bool readSettings(bool backup) {
   if (json_object.containsKey("uprisings")) {
     uprisings = json_object["uprisings"].as<int>() + 1;
   }
+  if (json_object.containsKey("cycles1")) {
+    cycles1 = json_object["cycles1"].as<int>();
+  }
+  if (json_object.containsKey("cycles2")) {
+    cycles2 = json_object["cycles2"].as<int>();
+  }
+  if (json_object.containsKey("cycles3")) {
+    cycles3 = json_object["cycles3"].as<int>();
+  }
   if (json_object.containsKey("log")) {
-    last_accessed_log = json_object["log"].as<int>() + 1;
+    last_accessed_log = json_object["log"].as<int>();
   }
   if (json_object.containsKey("offset")) {
     offset = json_object["offset"].as<int>();
@@ -192,21 +201,27 @@ bool readSettings(bool backup) {
     steps3 = json_object["steps3"].as<int>();
   }
 
-  if (steps1 > 0 && steps2 > 0 && steps3 > 0) {
-    separately = true;
-  } else {
-      if (json_object.containsKey("separately")) {
-        separately = json_object["separately"].as<bool>();
-      }
+  // if (steps1 > 0 && steps2 > 0 && steps3 > 0) {
+  //   separately = true;
+  // } else {
+  if (json_object.containsKey("separately")) {
+    separately = json_object["separately"].as<bool>();
   }
+  // }
   if (json_object.containsKey("inverted")) {
     inverted_sequence = json_object["inverted"].as<bool>();
   }
   if (json_object.containsKey("tandem")) {
     tandem = json_object["tandem"].as<bool>();
   }
-  if (json_object.containsKey("fixit")) {
-    fixit = json_object["fixit"].as<int>();
+  if (json_object.containsKey("fixit1")) {
+    fixit1 = json_object["fixit1"].as<int>();
+  }
+  if (json_object.containsKey("fixit2")) {
+    fixit2 = json_object["fixit2"].as<int>();
+  }
+  if (json_object.containsKey("fixit3")) {
+    fixit3 = json_object["fixit3"].as<int>();
   }
   if (json_object.containsKey("lock")) {
     lock = json_object["lock"].as<bool>();
@@ -274,6 +289,15 @@ void saveSettings(bool log) {
     json_object["smart"] = smart_string;
   }
   json_object["uprisings"] = uprisings;
+  if (cycles1 > 0) {
+    json_object["cycles1"] = cycles1;
+  }
+  if (cycles2 > 0) {
+    json_object["cycles2"] = cycles2;
+  }
+  if (cycles3 > 0) {
+    json_object["cycles3"] = cycles3;
+  }
   if (last_accessed_log > 0) {
     json_object["log"] = last_accessed_log;
   }
@@ -304,8 +328,11 @@ void saveSettings(bool log) {
   if (reversed) {
     json_object["reversed"] = reversed;
   }
-  if ((steps1 > 0 && steps2 > 0 && steps3 > 0) || separately) {
-    json_object["separately"] = (steps1 > 0 && steps2 > 0 && steps3 > 0) || separately;
+  // if ((steps1 > 0 && steps2 > 0 && steps3 > 0) || separately) {
+  //   json_object["separately"] = (steps1 > 0 && steps2 > 0 && steps3 > 0) || separately;
+  // }
+  if (separately) {
+    json_object["separately"] = separately;
   }
   if (inverted_sequence) {
     json_object["inverted"] = inverted_sequence;
@@ -313,8 +340,14 @@ void saveSettings(bool log) {
   if (tandem) {
     json_object["tandem"] = tandem;
   }
-  if (fixit > 0) {
-    json_object["fixit"] = fixit;
+  if (fixit1 > 0) {
+    json_object["fixit1"] = fixit1;
+  }
+  if (fixit2 > 0) {
+    json_object["fixit2"] = fixit2;
+  }
+  if (fixit3 > 0) {
+    json_object["fixit3"] = fixit3;
   }
   if (lock) {
     json_object["lock"] = lock;
@@ -432,6 +465,14 @@ String getSensorDetail(bool basic) {
   return light > -1 ? (String(light) + (twilight_sensor ? "t" : "") + (!basic && twilight_counter > 0 ? ("," + String(twilight_counter)) : "")) : "-1";
 }
 
+String getCycles() {
+  return cycles1 + cycles2 + cycles3 > 0 ? String(cycles1) + "." + String(cycles2) + "." + String(cycles3) : "0";
+}
+
+String getFixit() {
+  return fixit1 + fixit2 + fixit3 > 0 ? String(fixit1) + "." + String(fixit2) + "." + String(fixit3) : "0";
+}
+
 
 void sayHelloToTheServer() {
   // This function is only available with a ready-made iDom device.
@@ -451,7 +492,6 @@ void startServices() {
   server.on("/measurement/end", HTTP_POST, endMeasurement);
   server.on("/log", HTTP_GET, requestForLogs);
   server.on("/log", HTTP_DELETE, clearTheLog);
-  server.on("/admin/update", HTTP_POST, manualUpdate);
   server.on("/admin/reset", HTTP_POST, setMin);
   server.on("/admin/setmax", HTTP_POST, setMax);
   server.on("/admin/setasmax", HTTP_POST, setAsMax);
@@ -496,8 +536,8 @@ void handshake() {
   + ",\"separately\":" + separately
   + ",\"inverted\":" + inverted_sequence
   + ",\"tandem\":" + tandem
-  + ",\"fixit\":" + fixit
-  + ",\"lock\":" + lock
+  + ",\"fixit\":\"" + getFixit()
+  + "\",\"lock\":" + lock
   + ",\"last_accessed_log\":" + last_accessed_log
   + ",\"location\":\"" + geo_location
   + "\",\"version\":" + version + "." + core_version
@@ -508,7 +548,8 @@ void handshake() {
   + ",\"time\":" + (RTCisrunning() ? String(rtc.now().unixtime() - offset - (dst ? 3600 : 0)) : "0")
   + ",\"active\":" + String(RTCisrunning() ? (rtc.now().unixtime() - offset - (dst ? 3600 : 0) - start_time) : (millis() / 1000))
   + ",\"uprisings\":" + uprisings
-  + ",\"offline\":" + offline;
+  + ",\"cycles\":\"" + getCycles()
+  + "\",\"offline\":" + offline;
 
   Serial.print("\nHandshake");
   server.send(200, "text/plain", "{" + reply + "}");
@@ -562,7 +603,7 @@ void readData(String payload, bool per_wifi) {
       wings = json_object["wings"].as<int>();
     }
 
-    calibration(json_object["calibrate"].as<int>(), json_object.containsKey("bypass"));
+    calibration(json_object["calibrate"].as<int>(), json_object.containsKey("positioning"), false);
     return;
   }
 
@@ -626,16 +667,31 @@ void readData(String payload, bool per_wifi) {
 
   if (json_object.containsKey("val")) {
     String new_value = json_object["val"].as<String>();
-    if (steps1 > 0) {
-      destination1 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1);
-    }
 
-    new_value = new_value.substring(new_value.indexOf(".") + 1);
-    if (steps2 > 0) {
-      destination2 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2);
-    }
-    if (steps3 > 0) {
-      destination3 = toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3);
+    if ((destination1 != actual1 || destination2 != actual2 || destination3 != actual3)
+    && (steps1 == 0 || (steps1 > 0 && destination1 == toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1)))
+    && (steps2 == 0 || (steps2 > 0 && destination2 == toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2)))
+    && (steps3 == 0 || (steps3 > 0 && destination3 == toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3)))) {
+      if (steps1 > 0 && destination1 != actual1) {
+        destination1 = actual1 - 1;
+      }
+      if (steps2 > 0 && destination2 != actual2) {
+        destination2 = actual2 - 1;
+      }
+      if (steps3 > 0 && destination3 != actual3) {
+        destination3 = actual3 - 1;
+      }
+    } else {
+      if (steps1 > 0) {
+        destination1 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1);
+      }
+      new_value = new_value.substring(new_value.indexOf(".") + 1);
+      if (steps2 > 0) {
+        destination2 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2);
+      }
+      if (steps3 > 0) {
+        destination3 = toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3);
+      }
     }
 
     if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
@@ -647,21 +703,21 @@ void readData(String payload, bool per_wifi) {
     }
   }
 
-  if (json_object.containsKey("steps1") && actual1 == 0) {
+  if (json_object.containsKey("steps1") && actual1 == destination1) {
     if (steps1 != json_object["steps1"].as<int>()) {
       steps1 = json_object["steps1"].as<int>();
       details_change = true;
     }
   }
 
-  if (json_object.containsKey("steps2") && actual2 == 0) {
+  if (json_object.containsKey("steps2") && actual2 == destination2) {
     if (steps2 != json_object["steps2"].as<int>()) {
       steps2 = json_object["steps2"].as<int>();
       details_change = true;
     }
   }
 
-  if (json_object.containsKey("steps3") && actual3 == 0) {
+  if (json_object.containsKey("steps3") && actual3 == destination3) {
     if (steps3 != json_object["steps3"].as<int>()) {
       steps3 = json_object["steps3"].as<int>();
       details_change = true;
@@ -704,8 +760,20 @@ void readData(String payload, bool per_wifi) {
   }
 
   if (json_object.containsKey("fixit")) {
-    if (fixit != json_object["fixit"].as<int>()) {
-      fixit = json_object["fixit"].as<int>();
+    if (getFixit() != json_object["fixit"].as<String>()) {
+      String new_fixit = json_object["fixit"].as<String>();
+
+      if (strContains(new_fixit, ".")) {
+        fixit1 = new_fixit.substring(0, new_fixit.indexOf(".")).toInt();
+        new_fixit = new_fixit.substring(new_fixit.indexOf(".") + 1);
+
+        fixit2 = new_fixit.substring(0, new_fixit.indexOf(".")).toInt();
+        fixit3 = new_fixit.substring(new_fixit.indexOf(".") + 1).toInt();
+      } else {
+        fixit1 = new_fixit.toInt();
+        fixit2 = 0;
+        fixit3 = 0;
+      }
       details_change = true;
     }
   }
@@ -964,7 +1032,11 @@ bool automaticSettings(bool light_changed) {
           end_time_result = smart_array[i].end_time == current_time && smart_array[i].access + 60 < now.unixtime();
           local_result |= end_time_result;
           if (!end_time_result && smart_array[i].any_required) {
-            end_time_result = smart_array[i].end_time < current_time;
+            if (smart_array[i].action > -1) {
+              end_time_result = smart_array[i].end_time > current_time;
+            } else {
+              end_time_result = smart_array[i].end_time < current_time;
+            }
           }
         }
         if (smart_array[i].at_sunset) {
@@ -1173,60 +1245,90 @@ void setSmart() {
 }
 
 void setMin() {
-  if (steps1 > 0) {
+  wings = 123;
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument json_object(1024);
+    deserializeJson(json_object, server.arg("plain"));
+
+    if (!json_object.isNull() && json_object.containsKey("wings")) {
+      wings = json_object["wings"].as<int>();
+    }
+  }
+
+  if (strContains(wings, "1") && steps1 > 0) {
     destination1 = 0;
     actual1 = 0;
   }
-  if (steps2 > 0) {
+  if (strContains(wings, "2") && steps2 > 0) {
     destination2 = 0;
     actual2 = 0;
   }
-  if (steps3 > 0) {
+  if (strContains(wings, "3") && steps3 > 0) {
     destination3 = 0;
     actual3 = 0;
   }
 
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putOnlineData("val=0.0.0&pos=0.0.0");
+  putOnlineData("val=" + getValue() + "&pos=" + getPosition());
 }
 
 void setMax() {
-  if (steps1 > 0) {
+  wings = 123;
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument json_object(1024);
+    deserializeJson(json_object, server.arg("plain"));
+
+    if (!json_object.isNull() && json_object.containsKey("wings")) {
+      wings = json_object["wings"].as<int>();
+    }
+  }
+
+  if (strContains(wings, "1") && steps1 > 0) {
     destination1 = steps1;
     actual1 = steps1;
   }
-  if (steps2 > 0) {
+  if (strContains(wings, "2") && steps2 > 0) {
     destination2 = steps2;
     actual2 = steps2;
   }
-  if (steps3 > 0) {
+  if (strContains(wings, "3") && steps3 > 0) {
     destination3 = steps3;
     actual3 = steps3;
   }
 
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putOnlineData("val=100.100.100&pos=100.100.100");
+  putOnlineData("val=" + getValue() + "&pos=" + getPosition());
 }
 
 void setAsMax() {
-  if (steps1 > 0) {
+  wings = 123;
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument json_object(1024);
+    deserializeJson(json_object, server.arg("plain"));
+
+    if (!json_object.isNull() && json_object.containsKey("wings")) {
+      wings = json_object["wings"].as<int>();
+    }
+  }
+
+  if (strContains(wings, "1") && steps1 > 0) {
     steps1 = actual1;
     destination1 = actual1;
   }
-  if (steps2 > 0) {
+  if (strContains(wings, "2") && steps2 > 0) {
     steps2 = actual2;
     destination2 = actual2;
   }
-  if (steps3 > 0) {
+  if (strContains(wings, "3") && steps3 > 0) {
     steps3 = actual3;
     destination3 = actual3;
   }
 
   saveSettings();
   server.send(200, "text/plain", "Done");
-  putOnlineData("val=100.100.100&pos=100.100.100");
+  putOnlineData("val=" + getValue() + "&pos=" + getPosition() + "&detail=" + getBlindsDetail());
 }
 
 void initiateTheLightSensor() {
@@ -1337,19 +1439,34 @@ void prepareRotation(String orderer) {
     logs += "\n 3 by " + String(destination3 - actual3) + " steps to " + toPercentages(destination3, steps3) + "%";
   }
   wings = 0;
-  if (fixit != 0) {
-    wings += (String(steps1 > 0 && destination1 == 0 && actual1 == steps1 ? "1" : "")
-      + String(steps2 > 0 && destination2 == 0 && actual2 == steps2 ? "2" : "")
-      + String(steps3 > 0 && destination3 == 0 && actual3 == steps3 ? "3" : "")).toInt();
+  if (fixit1 != 0 || fixit2 != 0 || fixit3 != 0) {
+    wings += (String(fixit1 != 0 && steps1 > 0 && destination1 == 0 && actual1 == steps1 ? "1" : "")
+      + String(fixit2 != 0  && steps2 > 0 && destination2 == 0 && actual2 == steps2 ? "2" : "")
+      + String(fixit3 != 0 && steps3 > 0 && destination3 == 0 && actual3 == steps3 ? "3" : "")).toInt();
   }
   note("Movement (" + orderer + "): " + logs);
+
+  if (steps1 > 0 && destination1 == 0 && actual1 == steps1) {
+    cycles1++;
+    if (tandem) {
+      cycles2++;
+    }
+  }
+  if (!tandem) {
+    if (steps2 > 0 && destination2 == 0 && actual2 == steps2) {
+      cycles2++;
+    }
+    if (steps3 > 0 && destination3 == 0 && actual3 == steps3) {
+      cycles3++;
+    }
+  }
 
   saveSettings();
   saveTheState();
 }
 
-void calibration(int set, bool bypass) {
-  if (!bypass && (destination1 != actual1 || destination2 != actual2 || destination3 != actual3)) {
+void calibration(int set, bool positioning, bool fixit) {
+  if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
     return;
   }
 
@@ -1357,20 +1474,22 @@ void calibration(int set, bool bypass) {
   String logs = "";
 
   if (strContains(wings, "1")) {
-    if (actual1 == 0) {
-      actual1 -= set / 2;
+    if (actual1 == 0 || positioning) {
+      actual1 -= (fixit ? fixit1 * -1 : set) / 2;
+      logs += "\n " + String(tandem ? "tandem" : "1") + " by " + String(fixit ? fixit1 : set) + " steps.";
     } else
       if (actual1 == steps1) {
         steps1 += set / 2;
         destination1 = steps1;
         settings_change = true;
-        logs += "\n 1 by " + String(set) + " steps. Steps set at " + String(steps1) + ".";
+        logs += "\n " + String(tandem ? "tandem" : "1") + " by " + String(set) + " steps. Steps set at " + String(steps1) + ".";
       }
   }
   if (!tandem) {
     if (strContains(wings, "2")) {
-      if (actual2 == 0) {
-        actual2 -= set / 2;
+      if (actual2 == 0 || positioning) {
+        actual2 -= (fixit ? fixit2 * -1 : set) / 2;
+        logs += "\n 2 by " + String(fixit ? fixit2 : set) + " steps.";
       } else
         if (actual2 == steps2) {
           steps2 += set / 2;
@@ -1380,8 +1499,9 @@ void calibration(int set, bool bypass) {
         }
     }
     if (strContains(wings, "3")) {
-      if (actual3 == 0) {
-        actual3 -= set / 2;
+      if (actual3 == 0 || positioning) {
+        actual3 -= (fixit ? fixit3 * -1 : set) / 2;
+        logs += "\n 3 by " + String(fixit ? fixit3 : set) + " steps.";
       } else
         if (actual3 == steps3) {
           steps3 += set / 2;
@@ -1398,7 +1518,11 @@ void calibration(int set, bool bypass) {
     saveTheState();
     putOnlineData("detail=" + getBlindsDetail());
   } else {
-    note("Zero calibration. " + String(wings) + " by " + String(set) + " steps.");
+    if (fixit) {
+      note("Fixit: " + logs);
+    } else {
+      note("Calibration: " + logs);
+    }
   }
   wings = 0;
 }
