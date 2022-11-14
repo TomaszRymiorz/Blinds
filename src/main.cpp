@@ -665,44 +665,6 @@ void readData(String payload, bool per_wifi) {
     }
   }
 
-  if (json_object.containsKey("val")) {
-    String new_value = json_object["val"].as<String>();
-
-    if ((destination1 != actual1 || destination2 != actual2 || destination3 != actual3)
-    && (steps1 == 0 || (steps1 > 0 && destination1 == toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1)))
-    && (steps2 == 0 || (steps2 > 0 && destination2 == toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2)))
-    && (steps3 == 0 || (steps3 > 0 && destination3 == toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3)))) {
-      if (steps1 > 0 && destination1 != actual1) {
-        destination1 = actual1 - 1;
-      }
-      if (steps2 > 0 && destination2 != actual2) {
-        destination2 = actual2 - 1;
-      }
-      if (steps3 > 0 && destination3 != actual3) {
-        destination3 = actual3 - 1;
-      }
-    } else {
-      if (steps1 > 0) {
-        destination1 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1);
-      }
-      new_value = new_value.substring(new_value.indexOf(".") + 1);
-      if (steps2 > 0) {
-        destination2 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps2);
-      }
-      if (steps3 > 0) {
-        destination3 = toSteps(new_value.substring(new_value.indexOf(".") + 1).toInt(), steps3);
-      }
-    }
-
-    if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
-      lock = (destination1 == steps1 && steps1 > 0) || (destination2 == steps2 && steps2 > 0) || (destination3 == steps3 && steps3 > 0);
-      prepareRotation(per_wifi ? (json_object.containsKey("apk") ? "apk" : "local") : "cloud");
-      if (per_wifi) {
-        result += String(result.length() > 0 ? "&" : "") + "val=" + getValue();
-      }
-    }
-  }
-
   if (json_object.containsKey("steps1") && actual1 == destination1) {
     if (steps1 != json_object["steps1"].as<int>()) {
       steps1 = json_object["steps1"].as<int>();
@@ -816,6 +778,44 @@ void readData(String payload, bool per_wifi) {
         light_delay = (twilight_sensor ? dusk_delay : dawn_delay) * 60; // * ((twilight_sensor ? dusk_delay : dawn_delay) < 0 ? -1 : 1))
       } else {
         automaticSettings(true);
+      }
+    }
+  }
+
+  if (json_object.containsKey("val")) {
+    String new_value = json_object["val"].as<String>();
+    String next_value = new_value.substring(new_value.indexOf(".") + 1);
+
+    if ((destination1 != actual1 || destination2 != actual2 || destination3 != actual3) && !settings_change
+    && (steps1 == 0 || (steps1 > 0 && destination1 == toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1)))
+    && (steps2 == 0 || (steps2 > 0 && destination2 == toSteps(next_value.substring(0, next_value.indexOf(".")).toInt(), steps2)))
+    && (steps3 == 0 || (steps3 > 0 && destination3 == toSteps(next_value.substring(next_value.indexOf(".") + 1).toInt(), steps3)))) {
+      if (steps1 > 0 && destination1 != actual1) {
+        destination1 = actual1 - 1;
+      }
+      if (steps2 > 0 && destination2 != actual2) {
+        destination2 = actual2 - 1;
+      }
+      if (steps3 > 0 && destination3 != actual3) {
+        destination3 = actual3 - 1;
+      }
+    } else {
+      if (steps1 > 0) {
+        destination1 = toSteps(new_value.substring(0, new_value.indexOf(".")).toInt(), steps1);
+      }
+      if (steps2 > 0) {
+        destination2 = toSteps(next_value.substring(0, next_value.indexOf(".")).toInt(), steps2);
+      }
+      if (steps3 > 0) {
+        destination3 = toSteps(next_value.substring(next_value.indexOf(".") + 1).toInt(), steps3);
+      }
+    }
+
+    if (destination1 != actual1 || destination2 != actual2 || destination3 != actual3) {
+      lock = (destination1 == steps1 && steps1 > 0) || (destination2 == steps2 && steps2 > 0) || (destination3 == steps3 && steps3 > 0);
+      prepareRotation(per_wifi ? (json_object.containsKey("apk") ? "apk" : "local") : "cloud");
+      if (per_wifi) {
+        result += String(result.length() > 0 ? "&" : "") + "val=" + getValue();
       }
     }
   }

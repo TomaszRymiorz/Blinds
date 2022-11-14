@@ -4,7 +4,7 @@
 
 const char device[7] = "blinds";
 const char smart_prefix = 'b';
-const int version = 27;
+const int version = 28;
 
 const int light_sensor_pin = A0;
 
