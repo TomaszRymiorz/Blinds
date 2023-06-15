@@ -26,24 +26,29 @@ Możliwe jest również, ustawienie wymogu spełnienia kilku warunków jednocze�
 Powtarzalność ustawień automatycznych obejmuje okres jednego tygodnia, a ustawienia nie są ograniczone ilościowo.
 W celu zminimalizowania objętości wykorzystany został zapis tożsamy ze zmienną boolean, czyli dopiero wystąpienie znaku wskazuje na włączoną funkcję.
 
-* '1', '2', '3' numer rolety, którą steruje urządzenie
-* '4' wszystkie rolety, którymi steruje urządzenie
-* 'w' cały tydzień
+* '1', '2', '3' przed symbolem "|" lub "&" (jeśli nie występuje "|") oznacza numer rolety, którą steruje urządzenie
+* '4' to wszystkie rolety, którymi steruje urządzenie
 * 'o' poniedziałek, 'u' wtorek, 'e' środa, 'h' czwartek, 'r' piątek, 'a' sobota, 's' niedziela
-* 'n' o zachodzie słońca
-* 'd' o wschodzie słońca
-* '<' po zmroku
-* '>' po świcie
-* 'z' reaguj na zachmurzenie (po zmroku oraz po świcie)
+* Brak wskazania dnia wygodnia oznacza, że ustawienie obejmuje cały tydzień
+* 'n' wyzwalacz o zachodzie słońca.
+* 'd' wyzwalacz o wschodzie słońca
+* '<' wyzwalacz o zmroku
+* '>' wyzwalacz o świcie
+* 'z' wyzwalacz reaguj na zachmurzenie (po zmroku oraz po świcie)
+* Każdy z powyższych wyzwalaczy może zawierać dodatkowe parametry zawarte w nawiasach, jak opóźnienie czasowe lub własne ustawienie LDR.
+* 'l()', 'b()', 't()', 'c()' to wyzwalacze związane bezpośrednio z urządzeniem.
+* 'l()' włączenie/wyłączenie światła
+* 'b()', 'c()' pozycja rolety lub okna
+* 't()' osiągnięcie określonej temperatury na termostacie
 * '_' o godzinie - jeśli znak występuje w zapisie, przed nim znajduje się godzina w zapisie czasu uniksowego
-* '-' podnieś o godzinie - jeśli występuje w zapisie, po nim znajduje się godzina w zapisie czasu uniksowego
+* 'h(-1;-1)' między godzinami, jeśli obie cyfry są różne od "-1" lub po godzinie, przed godziną. "-1" oznacza, że nie ma wskazanej godziny
 * '/' wyłącz ustawienie - obecność znaku wskazuje, że ustawienie będzie ignorowane
 * '&' wszystkie wyzwalacze muszą zostać spełnione by wykonać akcje
-* cyfra bezpośrednio przed 'b', ale po znaku "_" (jeśli występuje) oznacza procentową pozycję rolety
-
-Obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
-
-Przykład zapisu ustawień automatycznych: b&12ouehrd-420,b&12asd-480,1140_b12w<
+* cyfra między symbolami "|" i "|" (lub "&" jako drugi symbol, jeśli jest wskazanie na wszystkie wyzwalacze) oznacza akcje do wykonania
+* Obecność znaku 'b' wskazuje, że ustawienie dotyczy rolety.
+* 'r()' i 'r2()' w nawiasach zawierają warunki, które muszą być spełnione w chwili aktywacji wyzwalacza, aby wykonać akcje
+* 'r()' to wymaganie określonego stanu świateł, pozycji rolety, okna lub stanu czy temperatury termostatu
+* 'r2()' wymaganie dotyczące pozycji słońca: wschód, zmierzch, świt, zmrok
 
 ### Sterowanie
 Sterowanie urządzeniem odbywa się poprzez wykorzystanie metod dostępnych w protokole HTTP. Sterować można z przeglądarki lub dedykowanej aplikacji.
